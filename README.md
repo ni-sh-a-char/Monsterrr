@@ -1,2 +1,2 @@
 # Monsterrr
-Creator, Organizer and Maintainer for ni_sh_a.char...
+Creator, Organizer and Maintainer for ni_sh_a.char
