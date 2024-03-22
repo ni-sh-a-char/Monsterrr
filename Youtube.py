@@ -1,6 +1,5 @@
 import requests
 from bs4 import BeautifulSoup
-import re
 import os
 import torch
 from transformers import (
@@ -17,6 +16,9 @@ def collect_youtube_data(topic, max_results=50):
     try:
         base_url = f"https://www.youtube.com/results?search_query={topic.replace(' ', '+')}"
         response = requests.get(base_url)
+        if response.status_code != 200:
+            print(f"Failed to retrieve page, status code: {response.status_code}")
+            return []
         soup = BeautifulSoup(response.text, "html.parser")
         titles = []
 
@@ -30,8 +32,10 @@ def collect_youtube_data(topic, max_results=50):
                 f.write(title.strip() + "\n")
 
         print(f"Collected {len(titles)} video titles related to '{topic}'.")
+        return titles[:max_results]
     except Exception as e:
         print(f"Error collecting data: {e}")
+        return []
 
 # Main function to train the language model
 def main():
@@ -42,7 +46,10 @@ def main():
     max_results = 50
 
     # Collect YouTube data related to the topic through web scraping
-    collect_youtube_data(topic, max_results)
+    titles = collect_youtube_data(topic, max_results)
+    if not titles:
+        print("No data collected. Exiting.")
+        return
 
     # Load pretrained GPT-2 model and tokenizer
     model_name = "gpt2"
@@ -84,6 +91,9 @@ def main():
     )
 
     trainer.train()
+
+    # Save the trained model
+    trainer.save_model('./youtube_language_model')
 
 if __name__ == "__main__":
     main()
