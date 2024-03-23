@@ -53,6 +53,11 @@ def train_model():
     with open("wikipedia_data.txt", "r", encoding="utf-8") as f:
         wikipedia_text = f.read()
 
+    # Check if the text data is empty
+    if not wikipedia_text.strip():
+        print("The Wikipedia data is empty. Please ensure the Wikipedia page URL is correct and accessible.")
+        return
+
     # Define dataset and data collator for language modeling
     dataset = TextDataset(
         tokenizer=tokenizer,
@@ -101,8 +106,10 @@ def train_model():
 def main():
     topic = input("Enter the topic you want to fetch data from Wikipedia: ")
     wikipedia_text = scrape_wikipedia_data(topic)
-    if wikipedia_text:
-        train_model()
+    if not wikipedia_text:
+        print("Failed to collect Wikipedia data. Please try a different topic or check your internet connection.")
+        return
+    train_model()
 
 if __name__ == "__main__":
     main()
