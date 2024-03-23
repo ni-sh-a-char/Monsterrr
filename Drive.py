@@ -1,42 +1,20 @@
-import requests
-from bs4 import BeautifulSoup
-from urllib.parse import quote_plus
+from googlesearch import search
 from transformers import GPT2LMHeadModel, GPT2Tokenizer, TextDataset, DataCollatorForLanguageModeling, Trainer, TrainingArguments
 
-def search_google(topic, site="drive.google.com"):
-    # Perform a Google search with the provided topic and filter by the specified site
-    query = f"{topic} site:{site}"
-    search_url = f"https://www.google.com/search?q={quote_plus(query)}"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
-    
-    try:
-        response = requests.get(search_url, headers=headers)
-        if response.status_code == 200:
-            return response.text
-        else:
-            print(f"Failed to perform Google search. Status code: {response.status_code}")
-            return None
-    except Exception as e:
-        print(f"Error performing Google search: {e}")
-        return None
+def search_web(topic):
+    # Search the web for content related to the given topic
+    query = f"{topic}"
+    search_results = search(query, num_results=5)
+    return search_results
 
-def extract_video_titles(html_content):
-    # Extract video titles from the HTML content of the search results
-    soup = BeautifulSoup(html_content, "html.parser")
-    video_titles = []
-    for link in soup.find_all("h3", {"class": "LC20lb DKV0Md"}):
-        video_titles.append(link.get_text())
-    return video_titles
-
-def preprocess_data(video_titles):
-    # Preprocess the video titles as needed
-    # For example, tokenize the titles and remove special characters
-    # Return a list of preprocessed text data
+def preprocess_data(search_results):
+    # Preprocess the search results as needed
+    # For this example, we'll just use the titles of the search results
     preprocessed_data = []
-    for title in video_titles:
-        # Example preprocessing steps
-        cleaned_title = title.strip().replace('\n', ' ')
-        preprocessed_data.append(cleaned_title)
+    for result in search_results:
+        # Example preprocessing step: Extract the title from the URL
+        title = result.split('/')[-1].replace('_', ' ')
+        preprocessed_data.append(title)
     return preprocessed_data
 
 def train_language_model(data):
@@ -45,13 +23,23 @@ def train_language_model(data):
     tokenizer = GPT2Tokenizer.from_pretrained(model_name)
     model = GPT2LMHeadModel.from_pretrained(model_name)
 
+    # Write preprocessed data to a file
+    with open("preprocessed_data.txt", "w", encoding="utf-8") as f:
+        for text in data:
+            f.write(text + "\n")
+
     # Define dataset and data collator for language modeling
-    dataset = TextDataset(tokenizer=tokenizer, file_path=None, block_size=128, texts=data)
+    dataset = TextDataset(tokenizer=tokenizer, file_path="preprocessed_data.txt", block_size=128)
     data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
+
+    # Check if the dataset is empty
+    if len(dataset) == 0:
+        print("The dataset is empty. Please ensure the preprocessed data file is not empty and correctly formatted.")
+        return
 
     # Define training arguments
     training_args = TrainingArguments(
-        output_dir="./google_drive_lm",
+        output_dir="./web_lm",
         overwrite_output_dir=True,
         num_train_epochs=3,
         per_device_train_batch_size=4,
@@ -74,19 +62,16 @@ def train_language_model(data):
     trainer.train()
 
     # Save the trained model
-    trainer.save_model('./google_drive_language_model')
+    trainer.save_model('./web_language_model')
 
 def main():
-    topic = input("Enter the topic you want to search on Google Drive: ")
-    html_content = search_google(topic)
-    if not html_content:
+    topic = input("Enter the topic you want to search on the web: ")
+    # Search the web for content related to the topic
+    search_results = search_web(topic)
+    if not search_results:
         print("No search results found. Exiting.")
         return
-    video_titles = extract_video_titles(html_content)
-    if not video_titles:
-        print("No video titles found in the search results. Exiting.")
-        return
-    preprocessed_data = preprocess_data(video_titles)
+    preprocessed_data = preprocess_data(search_results)
     train_language_model(preprocessed_data)
 
 if __name__ == "__main__":
