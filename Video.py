@@ -1,29 +1,32 @@
 import os
+import subprocess
 from google.cloud import speech_v1p1beta1 as speech
 from transformers import GPT2LMHeadModel, GPT2Tokenizer, TextDataset, DataCollatorForLanguageModeling, Trainer, TrainingArguments
 
-# Step 1: Generate Transcripts from Local Video Files
-def generate_transcripts_from_videos(video_paths):
-    transcripts = []
-    for path in video_paths:
-        client = speech.SpeechClient()
+# Step 1: Convert MP4 to WAV and Generate Transcripts
+def convert_and_generate_transcripts(video_path):
+    # Convert MP4 to WAV
+    wav_path = video_path.replace('.mp4', '.wav')
+    subprocess.run(['ffmpeg', '-i', video_path, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', wav_path])
 
-        with open(path, "rb") as audio_file:
-            content = audio_file.read()
+    # Generate transcript from WAV
+    client = speech.SpeechClient()
+    with open(wav_path, "rb") as audio_file:
+        content = audio_file.read()
 
-        audio = speech.RecognitionAudio(content=content)
-        config = speech.RecognitionConfig(
-            encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-            sample_rate_hertz=16000,
-            language_code="en-US",
-        )
+    audio = speech.RecognitionAudio(content=content)
+    config = speech.RecognitionConfig(
+        encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
+        sample_rate_hertz=16000,
+        language_code="en-US",
+    )
 
-        response = client.recognize(config=config, audio=audio)
+    response = client.recognize(config=config, audio=audio)
+    transcript = ""
+    for result in response.results:
+        transcript += result.alternatives[0].transcript
 
-        for result in response.results:
-            transcripts.append(result.alternatives[0].transcript)
-
-    return transcripts
+    return transcript
 
 # Step 2: Preprocess Data
 def preprocess_data(transcripts, tokenizer):
@@ -69,10 +72,17 @@ def train_language_model(preprocessed_data, tokenizer):
     trainer.save_model('./video_language_model')
 
 def main():
-    # Step 1: Generate Transcripts from Local Video Files
-    video_paths = ["path/to/video1.wav", "path/to/video2.wav"] # Adjust paths to your local video files
-    transcripts = generate_transcripts_from_videos(video_paths)
-    
+    # Step 1: Convert MP4 to WAV and Generate Transcripts
+    root_dir = "path/to/your/root/directory" # Adjust this path to your root directory
+    transcripts = []
+    for subdir, dirs, files in os.walk(root_dir):
+        for file in files:
+            if file.endswith('.mp4'):
+                file_path = os.path.join(subdir, file)
+                transcript = convert_and_generate_transcripts(file_path)
+                if transcript: # Ensure the transcript is not empty
+                    transcripts.append(transcript)
+
     if not transcripts:
         print("No transcripts generated. Exiting.")
         return
