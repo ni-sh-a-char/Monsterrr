@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.env
+.env.*
+.venv/
+venv/
+
+# VSCode
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Test & Coverage
+.coverage
+htmlcov/
+.tox/
+.pytest_cache/
+
+# Build
+build/
+dist/
+.eggs/
+*.egg-info/
+
+# State/Artifacts
+monsterrr_state.json

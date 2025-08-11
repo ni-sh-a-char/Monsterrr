@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+requests
+PyGithub
+apscheduler  # Required for scheduler.py
+python-dotenv  # Required for utils/config.py
+groq
+beautifulsoup4
+praw
+feedparser
+black
+flake8
+pytest
+loguru
