@@ -36,6 +36,15 @@ Start the scheduler:
 python monsterrr/scheduler.py
 ```
 
+### SMTP Troubleshooting
+
+If emails are not being sent:
+- Double-check your `.env` for correct `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, and `SMTP_PASS` (Gmail requires an App Password, not your main password).
+- On startup, Monsterrr logs a "SMTP connectivity check" result. If it fails, check the error log for details.
+- If using Gmail, ensure "2-Step Verification" is enabled and you generated an App Password for "Mail".
+- Some providers (Zoho, Outlook, etc.) may require different ports or security settings.
+- If you see a traceback in the logs, use it to diagnose the problem or ask for help.
+
 ## Running in Docker
 Build and run (dev):
 ```sh

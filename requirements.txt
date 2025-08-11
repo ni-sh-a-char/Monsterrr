@@ -12,3 +12,4 @@ black
 flake8
 pytest
 loguru
+pydantic-settings
