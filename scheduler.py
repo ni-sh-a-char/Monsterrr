@@ -100,9 +100,13 @@ def send_startup_email():
     state = {}
     if os.path.exists("monsterrr_state.json"):
         with open("monsterrr_state.json", "r", encoding="utf-8") as f:
-            state = json.load(f)
-        subject = "🚀 Monsterrr is Now Live! | Initial System Status"
-        html = f"""
+            try:
+                state = json.load(f)
+            except Exception:
+                state = {}
+    # Always define subject, html, and text, even if state is empty
+    subject = "🚀 Monsterrr is Now Live! | Initial System Status"
+    html = f"""
 <div style='font-family:Segoe UI,Arial,sans-serif;max-width:600px;margin:0 auto;background:#f9f9fb;padding:32px 24px;border-radius:12px;border:1px solid #e3e7ee;'>
     <h1 style='color:#2d7ff9;margin-bottom:0.2em;'>Monsterrr is Now Live!</h1>
     <p style='font-size:1.1em;color:#333;margin-top:0;'>
