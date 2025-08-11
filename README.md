@@ -29,7 +29,7 @@ Monsterrr is a multi-agent, always-on system that discovers, creates, and mainta
 ## Running Locally
 Start the API:
 ```sh
-uvicorn monsterrr.main:app --reload
+uvicorn main:app --reload
 ```
 Start the scheduler:
 ```sh
@@ -42,13 +42,18 @@ Build and run (dev):
 docker build -t monsterrr:dev --target dev .
 docker run --env-file .env -p 8000:8000 monsterrr:dev
 ```
-For production, use `--target prod`.
+
 
 ## Deployment to Render
 1. Push code to your GitHub org.
 2. Connect Render to the repo.
 3. Add all .env variables in the Render dashboard.
 4. Deploy both the API service and background worker (see `render.yaml`).
+
+**Render Start Command:**
+```
+uvicorn main:app --host 0.0.0.0 --port 8000
+```
 
 ## .env Variables
 ```
