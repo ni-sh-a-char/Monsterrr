@@ -96,7 +96,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 # ==== Groq API ====
 GROQ_API_KEY=sk-your-groq-key-here
-GROQ_MODEL=mixtral-8x7b      # Best tradeoff between cost, quality, and speed
+GROQ_MODEL=llama-3.3-70b-versatile      # Best tradeoff between cost, quality, and speed
 GROQ_TEMPERATURE=0.2         # Low temp for factual, consistent outputs
 GROQ_MAX_TOKENS=2048         # Long enough for detailed reports
 
