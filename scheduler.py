@@ -29,11 +29,11 @@ maintainer_agent = MaintainerAgent(github, groq, logger)
 scheduler = AsyncIOScheduler()
 
 def daily_job():
-    logger.info("[Scheduler] Running daily job: Idea + Creator + Maintainer agents + status report.")
-    ideas = idea_agent.fetch_and_rank_ideas()
-    if ideas:
-        creator_agent.create_repository(ideas[0])
-    maintainer_agent.perform_maintenance()
+    logger.info("[Scheduler] Running daily job: MaintainerAgent plans and executes 3 contributions + status report.")
+    # Plan 3 contributions and execute them (not dry-run)
+    plan = maintainer_agent.plan_daily_contributions(num_contributions=3)
+    maintainer_agent.execute_daily_plan(plan, creator_agent=creator_agent, dry_run=False)
+    # After execution, send status report
     send_status_report()
 
 def send_status_report():
@@ -208,7 +208,8 @@ def smtp_connectivity_check():
 
 async def start_scheduler():
     smtp_connectivity_check()
-    scheduler.add_job(daily_job, "cron", hour=0)
+    # Run daily_job at UTC midnight every day
+    scheduler.add_job(daily_job, "cron", hour=0, minute=0)
     scheduler.start()
     logger.info("Scheduler started.")
     # One-time startup email logic (persisted in monsterrr_state.json)

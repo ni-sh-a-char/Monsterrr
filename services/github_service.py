@@ -4,6 +4,8 @@ GitHub API wrapper for Monsterrr.
 
 
 import os
+from dotenv import load_dotenv
+load_dotenv()
 import httpx
 import logging
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type

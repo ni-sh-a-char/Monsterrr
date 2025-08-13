@@ -19,6 +19,103 @@ class MaintainerAgent:
         self.logger = logger
         self.stale_days = stale_days
 
+    def plan_daily_contributions(self, num_contributions: int = 3, save_path: str = None) -> list:
+        """
+        Use Groq LLM to plan exactly `num_contributions` meaningful contributions for today.
+        Contributions can be repo creation or feature branch (with AI-generated name).
+        Saves plan to logs/daily_plan_<date>.json.
+        Returns parsed plan (list of dicts).
+        """
+        from datetime import datetime
+        import json, os
+        repos = self.github_service.list_repositories()
+        repo_metadata = [
+            {"name": r["name"], "description": r.get("description", ""), "topics": r.get("topics", [])}
+            for r in repos
+        ]
+        prompt = (
+            f"You are Monsterrr, an autonomous GitHub org manager. Given the following org repo metadata, "
+            f"plan exactly {num_contributions} meaningful contributions for today. Each contribution must be either: "
+            f"(1) create a new repo (with AI-generated name, description, tech stack, roadmap), or (2) create a feature branch in an existing repo (with AI-generated branch name, short description, and a starter file/change idea). "
+            f"Branch names must be valid for Git, unique, and descriptive. Output a JSON list of contributions, each with type ('repo' or 'branch'), target repo (if branch), name, description, and details."
+            f"\n\nOrg repo metadata: {json.dumps(repo_metadata)[:4000]}"
+        )
+        self.logger.info(f"[MaintainerAgent] Planning daily contributions with Groq.")
+        plan = []
+        try:
+            response = self.groq_client.groq_llm(prompt)
+            self.logger.info(f"[MaintainerAgent] Groq plan raw response: {response[:2000]}")
+            try:
+                plan = json.loads(response)
+            except Exception as e:
+                self.logger.error(f"[MaintainerAgent] Groq plan not valid JSON: {e}. Re-prompting.")
+                retry_prompt = prompt + "\n\nReturn ONLY a valid JSON list, no extra text. If you cannot, return []."
+                response2 = self.groq_client.groq_llm(retry_prompt)
+                try:
+                    plan = json.loads(response2)
+                except Exception as e2:
+                    self.logger.error(f"[MaintainerAgent] Groq retry plan still not valid JSON: {e2}. Returning empty list.")
+                    plan = []
+            self.logger.info(f"[MaintainerAgent] Got {len(plan)} planned contributions.")
+        except Exception as e:
+            self.logger.error(f"[MaintainerAgent] Groq planning error: {e}")
+            plan = []
+        # Save plan to logs/daily_plan_<date>.json
+        date_str = datetime.utcnow().strftime("%Y-%m-%d")
+        save_path = save_path or f"logs/daily_plan_{date_str}.json"
+        try:
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            with open(save_path, "w", encoding="utf-8") as f:
+                json.dump(plan, f, indent=2)
+            self.logger.info(f"[MaintainerAgent] Saved daily plan to {save_path}")
+        except Exception as e:
+            self.logger.error(f"[MaintainerAgent] Error saving daily plan: {e}")
+        return plan
+
+    def execute_daily_plan(self, plan: list, creator_agent=None, dry_run: bool = False) -> None:
+        """
+        Execute the daily contribution plan. Supports dry-run mode.
+        For repo creation, calls CreatorAgent. For branch, creates branch, commits starter file/change, opens issue.
+        All actions are logged and auditable.
+        """
+        import os
+        for idx, contrib in enumerate(plan):
+            ctype = contrib.get("type")
+            name = contrib.get("name")
+            desc = contrib.get("description", "")
+            details = contrib.get("details", {})
+            target_repo = contrib.get("target_repo")
+            self.logger.info(f"[MaintainerAgent] Executing contribution {idx+1}: {ctype} | {name}")
+            if dry_run:
+                self.logger.info(f"[MaintainerAgent] DRY RUN: Would execute {ctype} | {name} | {desc} | {details}")
+                continue
+            try:
+                if ctype == "repo" and creator_agent:
+                    idea = {"name": name, "description": desc}
+                    idea.update(details)
+                    creator_agent.create_repository(idea)
+                    self.logger.info(f"[MaintainerAgent] Created repo: {name}")
+                elif ctype == "branch" and target_repo:
+                    branch_name = name
+                    # Create branch
+                    self.github_service.create_branch(target_repo, branch_name)
+                    self.logger.info(f"[MaintainerAgent] Created branch {branch_name} in {target_repo}")
+                    # Commit starter file/change
+                    file_path = details.get("file_path", "starter.txt")
+                    file_content = details.get("file_content", f"Starter for {branch_name}: {desc}")
+                    commit_msg = details.get("commit_message", f"Add starter for {branch_name}")
+                    self.github_service.create_or_update_file(target_repo, file_path, file_content, commit_msg, branch=branch_name)
+                    self.logger.info(f"[MaintainerAgent] Committed {file_path} to {branch_name} in {target_repo}")
+                    # Open issue
+                    issue_title = details.get("issue_title", f"[feature] {branch_name}: {desc}")
+                    issue_body = details.get("issue_body", f"Auto-generated by Monsterrr for branch {branch_name}.")
+                    self.github_service.create_issue(target_repo, issue_title, issue_body, labels=["feature", "bot-suggestion"])
+                    self.logger.info(f"[MaintainerAgent] Opened issue for branch {branch_name} in {target_repo}")
+                else:
+                    self.logger.warning(f"[MaintainerAgent] Unknown contribution type or missing target_repo: {contrib}")
+            except Exception as e:
+                self.logger.error(f"[MaintainerAgent] Error executing contribution {idx+1}: {e}")
+
     def perform_maintenance(self) -> None:
         """
         Perform maintenance tasks across all repositories:

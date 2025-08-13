@@ -8,7 +8,7 @@ Monsterrr is a multi-agent, always-on system that discovers, creates, and mainta
 ## Features
 - **Idea Generator Agent:** Fetches trending project ideas, summarizes and ranks them with Groq, and stores results. Loads and validates all required `.env` variables before any operation.
 - **Creator Agent:** Creates new repos, scaffolds code, commits boilerplate, and opens starter issues. Loads and validates all required `.env` variables before any operation. Fails fast if credentials are missing or invalid.
-- **Maintainer Agent:** Monitors repos, responds to issues, auto-closes stale tickets, and suggests fixes with Groq. Loads and validates all required `.env` variables before any operation. Fails fast if credentials are missing or invalid.
+-- **Maintainer Agent:** Monitors repos, responds to issues, auto-closes stale tickets, suggests fixes with Groq, and now plans and executes exactly 3 meaningful contributions per day (repo creation or feature branch) using Groq LLM. All actions are logged and auditable. Supports dry-run mode for safe testing. On Render, the agent creates and replaces a daily JSON plan in `logs/daily_plan_<date>.json`.
 - **Scheduler:** Runs daily/weekly jobs and sends a weekly status report email.
 - **FastAPI API:** Webhooks, manual triggers, and status endpoints.
 - **Production-ready:** Robust error handling, retries, logging, and CI/CD. All agents use structured logging and retry logic for Groq and GitHub API calls.
@@ -20,17 +20,22 @@ Monsterrr is a multi-agent, always-on system that discovers, creates, and mainta
 	cd Monsterrr
 	pip install -r requirements.txt
 	```
-2. Copy `.env.example` to `.env` and fill in your secrets:
+2. Edit `.env` with your keys and SMTP credentials:
 	```sh
-	cp .env.example .env
 	# Edit .env with your keys and SMTP credentials
-	# All agents require GROQ_API_KEY, GROQ_MODEL, GITHUB_TOKEN, GITHUB_ORG, SMTP_HOST, SMTP_USER, SMTP_PASS, STATUS_REPORT_RECIPIENTS, DRY_RUN, and MAX_AUTO_CREATIONS_PER_DAY to be set.
+	# All agents require GROQ_API_KEY, GROQ_MODEL, GITHUB_TOKEN, GITHUB_ORG, SMTP_HOST, SMTP_USER, SMTP_PASS, STATUS_REPORT_RECIPIENTS, DRY_RUN, MAX_AUTO_CREATIONS_PER_DAY, and DAILY_ACTIVITY_MODE to be set.
 	# Agents will fail fast and log errors if any required variable is missing or invalid.
 	```
 
 ## Running Locally
 
+### Render Deployment
+Monsterrr is ready for deployment on [Render](https://render.com/). The scheduler runs automatically and ensures:
+- **Exactly 3 contributions are planned and executed daily** (repo creation or feature branch).
+- **A daily JSON plan is created and replaced in `logs/daily_plan_<date>.json`** for audit and review.
+- **All actions are logged and status reports are sent.**
 
+#### Local Development
 Start the API locally:
 ```sh
 uvicorn main:app --reload
@@ -38,8 +43,11 @@ uvicorn main:app --reload
 
 Start the scheduler:
 ```sh
-python monsterrr/scheduler.py
+python scheduler.py
 ```
+
+**Daily Planning & Execution:**
+Monsterrr will automatically plan and execute exactly 3 contributions per day (repo creation or feature branch) using Groq LLM. All actions are logged to `logs/daily_plan_<date>.json` for audit. To run in dry-run mode (log actions, no changes), set `DRY_RUN=true` in `.env`.
 
 Run agents manually for diagnostics:
 ```sh
@@ -74,7 +82,7 @@ docker run --env-file .env -p 8000:8000 monsterrr:dev
 ## Deployment to Render
 1. Push code to your GitHub org.
 2. Connect Render to the repo.
-3. Add all required .env variables in the Render dashboard (see `.env.example` for reference).
+3. Add all required .env variables in the Render dashboard (see `.env` for reference).
 4. Render will run the API service using:
 	```sh
 	uvicorn main:app --host 0.0.0.0 --port 8000
@@ -96,23 +104,27 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 # ==== Groq API ====
 GROQ_API_KEY=sk-your-groq-key-here
-GROQ_MODEL=llama-3.3-70b-versatile      # Best tradeoff between cost, quality, and speed
-GROQ_TEMPERATURE=0.2         # Low temp for factual, consistent outputs
-GROQ_MAX_TOKENS=2048         # Long enough for detailed reports
+GROQ_MODEL=llama-3.3-70b-versatile
+GROQ_TEMPERATURE=0.2
+GROQ_MAX_TOKENS=2048
 
 # ==== GitHub ====
 GITHUB_TOKEN=ghp-your-pat-here
-GITHUB_ORG=ni-sh-a-char      # Matches your org slug exactly
+GITHUB_ORG=your-org-slug
 
 # ==== Email (SMTP) ====
-SMTP_HOST=smtp.gmail.com     # Gmail example, can be Outlook, Zoho, etc.
-SMTP_PORT=587                # TLS port
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
 SMTP_USER=your-email@gmail.com
-SMTP_PASS=your-app-password  # Special app password (see below)
+SMTP_PASS=your-app-password
 
 # ==== Status Reports ====
 STATUS_REPORT_RECIPIENTS=you@example.com,teammate@example.com
 
+# ==== Daily Activity Mode ====
+DAILY_ACTIVITY_MODE=enabled   # enabled/disabled (default: enabled)
+DRY_RUN=false                 # true for dry-run mode (logs only, no actions)
+MAX_AUTO_CREATIONS_PER_DAY=3  # Number of contributions per day (default: 3)
 ```
 
 ## Weekly Status Report Example
@@ -149,3 +161,6 @@ Lint and format:
 ```sh
 flake8 monsterrr && black monsterrr
 ```
+
+## Audit Logging
+All daily plans and actions are saved to `logs/daily_plan_<date>.json` for full auditability. Set `DRY_RUN=true` to test planning and execution logic without making changes to GitHub.
