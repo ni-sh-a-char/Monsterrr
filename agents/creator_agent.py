@@ -4,6 +4,8 @@ Creator Agent for Monsterrr.
 
 
 import os
+import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from typing import Dict, Any
 import base64
 
@@ -22,41 +24,64 @@ class CreatorAgent:
         Args:
             idea (dict): Idea metadata (name, description, roadmap, etc.)
         """
-        name = idea.get("name")
-        description = idea.get("description", "")
+        repo_name = idea["name"]
+        description = idea["description"]
         tech_stack = idea.get("tech_stack", [])
         roadmap = idea.get("roadmap", [])
-        self.logger.info(f"[CreatorAgent] Creating repository for {name}")
+        self.logger.info(f"[CreatorAgent] Creating repository for {repo_name}")
         try:
-            repo = self.github_service.create_repository(name, description)
+            repo = self.github_service.create_repository(repo_name, description)
             self.logger.info(f"[CreatorAgent] Repo created: {repo.get('html_url')}")
-            # Scaffold files
-            self._scaffold_files(name, description, roadmap, tech_stack)
-            # Open starter issues
-            self._open_starter_issues(name, roadmap)
         except Exception as e:
             self.logger.error(f"[CreatorAgent] Error creating repo: {e}")
+            return
+        try:
+            self._scaffold_files(repo_name, description, roadmap, tech_stack)
+        except Exception as e:
+            self.logger.error(f"[CreatorAgent] Error scaffolding files: {e}")
+        try:
+            self._open_starter_issues(repo_name, roadmap)
+        except Exception as e:
+            self.logger.error(f"[CreatorAgent] Error opening starter issues: {e}")
 
-    def _scaffold_files(self, repo: str, description: str, roadmap: list, tech_stack: list):
+    def _scaffold_files(self, repo_name: str, description: str, roadmap: list, tech_stack: list):
         """Create README.md, LICENSE, .gitignore, main.py, and CI config."""
-        readme = f"# {repo}\n\n{description}\n\n## Tech Stack\n{', '.join(tech_stack)}\n\n## Roadmap\n" + '\n'.join(f"- {item}" for item in roadmap)
+        readme = f"# {repo_name}\n\n{description}\n\n## Tech Stack\n" + "\n".join([f"- {tech}" for tech in tech_stack]) + "\n\n## Roadmap\n" + "\n".join([f"- {step}" for step in roadmap])
         license_text = self._get_mit_license()
         gitignore = self._get_python_gitignore()
-        main_py = '# Entry point for the project\n\nif __name__ == "__main__":\n    print("Hello from {repo}")\n'
+        main_py = f'# Entry point for the project\n\nif __name__ == "__main__":\n    print("Hello from {repo_name}")\n'
         ci_yaml = self._get_github_actions_yaml()
         files = {
             "README.md": readme,
             "LICENSE": license_text,
             ".gitignore": gitignore,
-            f"{repo}/main.py": main_py,
+            f"{repo_name}/main.py": main_py,
             ".github/workflows/ci.yml": ci_yaml,
         }
         for path, content in files.items():
             try:
-                self.github_service.create_or_update_file(repo, path, content, commit_message=f"Add {path}")
+                self.github_service.create_or_update_file(repo_name, path, content, commit_message=f"Add {path}")
                 self.logger.info(f"[CreatorAgent] Added {path}")
             except Exception as e:
                 self.logger.error(f"[CreatorAgent] Error adding {path}: {e}")
+            readme = f"# {repo_name}\n\n{description}\n\n## Tech Stack\n" + "\n".join([f"- {tech}" for tech in tech_stack]) + "\n\n## Roadmap\n" + "\n".join([f"- {step}" for step in roadmap])
+            license_text = self._get_mit_license()
+            gitignore = self._get_python_gitignore()
+            main_py = f'# Entry point for the project\n\nif __name__ == "__main__":\n    print("Hello from {repo_name}")\n'
+            ci_yaml = self._get_github_actions_yaml()
+            files = {
+                "README.md": readme,
+                "LICENSE": license_text,
+                ".gitignore": gitignore,
+                f"{repo_name}/main.py": main_py,
+                ".github/workflows/ci.yml": ci_yaml,
+            }
+            for path, content in files.items():
+                try:
+                    self.github_service.create_or_update_file(repo_name, path, content, commit_message=f"Add {path}")
+                    self.logger.info(f"[CreatorAgent] Added {path}")
+                except Exception as e:
+                    self.logger.error(f"[CreatorAgent] Error adding {path}: {e}")
 
     def _open_starter_issues(self, repo: str, roadmap: list):
         """Open 'good first issues' based on roadmap."""
@@ -97,16 +122,31 @@ class CreatorAgent:
 
 if __name__ == "__main__":
     import logging
+    import os
+    from dotenv import load_dotenv
+    load_dotenv()
     from services.github_service import GitHubService
+    from services.groq_service import GroqService
     from utils.logger import setup_logger
+    from agents.idea_agent import IdeaGeneratorAgent
+    from utils.config import Settings
     logger = setup_logger()
+    settings = Settings()
+    try:
+        settings.validate()
+    except Exception as e:
+        logger.error(f"[Config] {e}")
+        raise
     github = GitHubService(logger=logger)
+    try:
+        github.validate_credentials()
+    except Exception as e:
+        logger.error(f"[GitHubService] {e}")
+        raise
+    groq = GroqService(api_key=settings.GROQ_API_KEY, logger=logger)
+    idea_agent = IdeaGeneratorAgent(groq, logger)
     agent = CreatorAgent(github, logger)
-    # Example idea
-    idea = {
-        "name": "SampleProject",
-        "description": "A sample project created by Monsterrr.",
-        "tech_stack": ["Python", "FastAPI"],
-        "roadmap": ["Set up project structure", "Add CI", "Write docs"]
-    }
-    agent.create_repository(idea)
+    # Always use AI-generated idea
+    ideas = idea_agent.fetch_and_rank_ideas(top_n=1)
+    if ideas:
+        agent.create_repository(ideas[0])

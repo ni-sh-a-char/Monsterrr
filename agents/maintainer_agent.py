@@ -4,6 +4,8 @@ Maintainer Agent for Monsterrr.
 
 
 from datetime import datetime, timedelta
+import sys, os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from typing import List, Dict, Any
 
 class MaintainerAgent:
@@ -30,8 +32,13 @@ class MaintainerAgent:
                 repo_name = repo["name"] if isinstance(repo, dict) else repo
                 self._handle_issues(repo_name)
                 self._handle_pull_requests(repo_name)
+                self._update_code(repo_name)
         except Exception as e:
             self.logger.error(f"[MaintainerAgent] Error in maintenance: {e}")
+
+    def _update_code(self, repo: str):
+        """Stub for code update/push logic (expand as needed)."""
+        self.logger.info(f"[MaintainerAgent] (Stub) Would update code for repo: {repo}")
 
     def _handle_issues(self, repo: str):
         issues = self.github_service.list_issues(repo, state="open")
@@ -81,11 +88,25 @@ class MaintainerAgent:
 if __name__ == "__main__":
     import logging
     import os
+    from dotenv import load_dotenv
+    load_dotenv()
     from services.github_service import GitHubService
     from services.groq_service import GroqService
     from utils.logger import setup_logger
+    from utils.config import Settings
     logger = setup_logger()
+    settings = Settings()
+    try:
+        settings.validate()
+    except Exception as e:
+        logger.error(f"[Config] {e}")
+        raise
     github = GitHubService(logger=logger)
-    groq = GroqService(api_key=os.getenv("GROQ_API_KEY"), logger=logger)
+    try:
+        github.validate_credentials()
+    except Exception as e:
+        logger.error(f"[GitHubService] {e}")
+        raise
+    groq = GroqService(api_key=settings.GROQ_API_KEY, logger=logger)
     agent = MaintainerAgent(github, groq, logger)
     agent.perform_maintenance()

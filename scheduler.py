@@ -42,42 +42,76 @@ def send_status_report():
     if os.path.exists("monsterrr_state.json"):
         with open("monsterrr_state.json", "r", encoding="utf-8") as f:
             state = json.load(f)
-        subject = "[Monsterrr] Daily Executive Status Report"
-        html = f"""
+    subject = "[Monsterrr] Daily Executive Status Report"
+    today = __import__('datetime').datetime.utcnow().strftime('%A, %d %B %Y')
+    # Gather details
+    ideas = state.get('ideas', {}).get('top_ideas', [])
+    repos = state.get('repos', [])
+    issues_opened = state.get('issues_opened', 0)
+    issues_closed = state.get('issues_closed', 0)
+    prs_merged = state.get('prs_merged', 0)
+    prs_open = state.get('prs_open', 0)
+    repo_issues = state.get('repo_issues', {})
+    actions = state.get('actions', [])
+    # Compose executive summary
+    summary = f"""
 <div style='font-family:Segoe UI,Arial,sans-serif;max-width:600px;margin:0 auto;background:#f9f9fb;padding:32px 24px;border-radius:12px;border:1px solid #e3e7ee;'>
     <h1 style='color:#2d7ff9;margin-bottom:0.2em;'>Monsterrr Daily Executive Report</h1>
     <p style='font-size:1.1em;color:#333;margin-top:0;'>
-        <b>Date:</b> {__import__('datetime').datetime.utcnow().strftime('%A, %d %B %Y')}<br>
+        <b>Date:</b> {today}<br>
         <b>Organization:</b> {settings.GITHUB_ORG}
     </p>
     <hr style='border:0;border-top:1px solid #e3e7ee;margin:18px 0;'>
-    <h2 style='color:#222;font-size:1.15em;margin-bottom:0.5em;'>Key Metrics</h2>
+    <h2 style='color:#222;font-size:1.15em;margin-bottom:0.5em;'>Executive Summary</h2>
+    <p style='font-size:1.05em;color:#222;'>
+        Today, Monsterrr proactively monitored your organization, processed trending open-source ideas, created new repositories, and maintained existing projects. Below is a detailed account of today's activities:
+    </p>
     <ul style='line-height:1.7;font-size:1.05em;'>
-        <li><b>New repositories created:</b> {len(state.get('repos', []))}</li>
-        <li><b>Issues opened:</b> {state.get('issues_opened', 0)} | <b>Issues closed:</b> {state.get('issues_closed', 0)}</li>
-        <li><b>Top 3 project ideas:</b> <ul style='margin:0 0 0 1em;padding:0;color:#2d7ff9;'>
-            {''.join(f"<li style='margin-bottom:2px;'><b>{i['name']}</b></li>" for i in state.get('ideas', {}).get('top_ideas', [])[:3])}
-        </ul></li>
-        <li><b>PR activity:</b> {state.get('prs_merged', 0)} merged, {state.get('prs_open', 0)} open</li>
-        <li><b>Next actions:</b> <span style='color:#2d7ff9;'>{state.get('next_week', '[Groq-generated plan]')}</span></li>
+        <li><b>Ideas processed:</b>
+            <ul style='margin:0 0 0 1em;padding:0;color:#2d7ff9;'>
+                {''.join(f"<li><b>{i['name']}</b>: {i['description']}<br><span style='color:#555;'>Tech: {', '.join(i.get('tech_stack', []) or i.get('techStack', []))} | Difficulty: {i.get('difficulty', 'N/A')} | Est. Dev Time: {i.get('estimated_dev_time', i.get('estimatedDevTime', 'N/A'))} weeks</span></li>" for i in ideas)}
+            </ul>
+        </li>
+        <li><b>Repositories created:</b>
+            <ul style='margin:0 0 0 1em;padding:0;color:#2d7ff9;'>
+                {''.join(f"<li><b>{r.get('name', r)}</b></li>" for r in repos)}
+            </ul>
+        </li>
+        <li><b>Issues detected and actions taken:</b>
+            <ul style='margin:0 0 0 1em;padding:0;color:#2d7ff9;'>
+                {''.join(f"<li><b>{repo}</b>: {issues}</li>" for repo, issues in repo_issues.items()) if repo_issues else '<li>No issues detected today.</li>'}
+                {''.join(f"<li>{a}</li>" for a in actions)}
+            </ul>
+        </li>
+        <li><b>PR activity:</b> {prs_merged} merged, {prs_open} open</li>
     </ul>
     <hr style='border:0;border-top:1px solid #e3e7ee;margin:18px 0;'>
-    <p style='font-size:0.98em;color:#555;'>
-        <b>Monsterrr</b> is your autonomous, always-on GitHub organization manager.<br>
-        <i>This report is generated and delivered automatically by Monsterrr AI.</i>
-    </p>
+    <p style='font-size:1em;color:#2d7ff9;'><b>Monsterrr</b> is your autonomous, always-on GitHub organization manager.<br><i>This report is generated and delivered automatically by Monsterrr AI.</i></p>
 </div>
 """
+    # Plain text version
     text = f"""
 Monsterrr Daily Status Report
 
-New repositories created: {len(state.get('repos', []))}
-Issues opened: {state.get('issues_opened', 0)} | Issues closed: {state.get('issues_closed', 0)}
-Top 3 project ideas: {', '.join(i['name'] for i in state.get('ideas', {}).get('top_ideas', [])[:3])}
-PR activity: {state.get('prs_merged', 0)} merged, {state.get('prs_open', 0)} open
-Next actions: {state.get('next_week', '[Groq-generated plan]')}
+Date: {today}
+Organization: {settings.GITHUB_ORG}
 
---
+Executive Summary:
+Today, Monsterrr proactively monitored your organization, processed trending open-source ideas, created new repositories, and maintained existing projects. Below is a detailed account of today's activities:
+
+Ideas processed:
+{chr(10).join(f"- {i['name']}: {i['description']} [Tech: {', '.join(i.get('tech_stack', []) or i.get('techStack', []))} | Difficulty: {i.get('difficulty', 'N/A')} | Est. Dev Time: {i.get('estimated_dev_time', i.get('estimatedDevTime', 'N/A'))} weeks]" for i in ideas)}
+
+Repositories created:
+{chr(10).join(f"- {r.get('name', r)}" for r in repos)}
+
+Issues detected and actions taken:
+{chr(10).join(f"- {repo}: {issues}" for repo, issues in repo_issues.items()) if repo_issues else '- No issues detected today.'}
+{chr(10).join(f"- {a}" for a in actions)}
+
+PR activity: {prs_merged} merged, {prs_open} open
+
+---
 This is an automated report from Monsterrr.
 """
     msg = MIMEMultipart('alternative')
@@ -85,8 +119,12 @@ This is an automated report from Monsterrr.
     msg['From'] = settings.SMTP_USER
     msg['To'] = ", ".join(settings.recipients)
     msg.attach(MIMEText(text, 'plain'))
-    msg.attach(MIMEText(html, 'html'))
+    msg.attach(MIMEText(summary, 'html'))
     try:
+        logger.info(f"[Scheduler] Email subject: {subject}")
+        logger.info(f"[Scheduler] Email recipients: {settings.recipients}")
+        logger.info(f"[Scheduler] Email HTML: {summary}")
+        logger.info(f"[Scheduler] Email text: {text}")
         with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
             server.starttls()
             server.login(settings.SMTP_USER, settings.SMTP_PASS)

@@ -34,6 +34,59 @@ class BaseService:
             raise GitHubAPIError(f"GitHub API error {resp.status_code}: {resp.text}")
 
 class GitHubService(BaseService):
+    def validate_credentials(self):
+        """Validate GitHub token and org access, log redacted token/org, fail fast if invalid."""
+        redacted_token = self.token[:6] + "..." + self.token[-4:] if self.token else "MISSING"
+        self.logger.info(f"[GitHubService] Startup: GITHUB_ORG={self.org} GITHUB_TOKEN={redacted_token}")
+        if not self.token:
+            raise RuntimeError("Missing GITHUB_TOKEN")
+        if not self.org:
+            raise RuntimeError("Missing GITHUB_ORG")
+        try:
+            with httpx.Client(timeout=10) as client:
+                user_resp = client.get(f"{self.BASE_URL}/user", headers=self.headers)
+                org_resp = client.get(f"{self.BASE_URL}/orgs/{self.org}", headers=self.headers)
+            if user_resp.status_code != 200:
+                raise RuntimeError(f"GitHub token invalid: {user_resp.text}")
+            if org_resp.status_code != 200:
+                raise RuntimeError(f"GitHub org invalid or not visible: {org_resp.text}")
+        except Exception as e:
+            self.logger.error(f"[GitHubService] Credential validation error: {e}")
+            raise
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), retry=retry_if_exception_type(httpx.RequestError))
+    def fetch_trending_repositories(self) -> List[Dict[str, Any]]:
+        """Fetch trending repositories using GitHub Search API (primary) or HTML scrape (fallback)."""
+        search_url = f"{self.BASE_URL}/search/repositories?q=stars:>1000&sort=stars&order=desc&per_page=25"
+        try:
+            resp = self._request("GET", search_url)
+            data = resp.json()
+            repos = []
+            for item in data.get("items", []):
+                repos.append({"name": item["name"], "description": item.get("description", "")})
+            if repos:
+                return repos
+        except Exception as e:
+            self.logger.error(f"[GitHubService] Search API error: {e}")
+        # Fallback: scrape HTML
+        try:
+            import requests
+            from bs4 import BeautifulSoup
+            html_url = "https://github.com/trending?since=weekly"
+            resp = requests.get(html_url, timeout=10)
+            bs = BeautifulSoup(resp.text, "html.parser")
+            repos = []
+            for repo_tag in bs.select("article.Box-row"):
+                name_tag = repo_tag.select_one("h2 a")
+                desc_tag = repo_tag.select_one("p")
+                name = name_tag.text.strip().replace("\n", "").replace(" ", "") if name_tag else ""
+                desc = desc_tag.text.strip() if desc_tag else ""
+                if name:
+                    repos.append({"name": name, "description": desc})
+            if repos:
+                return repos
+        except Exception as e:
+            self.logger.error(f"[GitHubService] Trending HTML scrape error: {e}")
+        return []
     """
     Service for interacting with the GitHub REST API (and optional GraphQL API).
     Provides methods for repo, file, issue, PR, and branch management.

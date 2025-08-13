@@ -6,9 +6,18 @@ from pydantic_settings import BaseSettings
 from typing import List
 
 class Settings(BaseSettings):
+    DRY_RUN: bool = False
+    MAX_AUTO_CREATIONS_PER_DAY: int = 3
+    def validate(self):
+        missing = []
+        for field in ["GROQ_API_KEY", "GITHUB_TOKEN", "GITHUB_ORG", "SMTP_HOST", "SMTP_USER", "SMTP_PASS"]:
+            if not getattr(self, field, None):
+                missing.append(field)
+        if missing:
+            raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
     GROQ_API_KEY: str
     GITHUB_TOKEN: str
-    GITHUB_ORG: str = "ni_sh_a.char"
+    GITHUB_ORG: str = "ni-sh-a-char"
     SMTP_HOST: str
     SMTP_PORT: int = 587
     SMTP_USER: str
@@ -21,6 +30,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        extra = "allow"
 
     @property
     def recipients(self) -> List[str]:
