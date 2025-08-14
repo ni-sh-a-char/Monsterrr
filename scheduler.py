@@ -105,9 +105,26 @@ def send_status_report():
         f"<li>{r.get('name', r)}</li>" for r in repos
     ]) if repos else "<li>No repositories created today.</li>"
 
-    contribution_items = "".join([
-        f"<li>{c.get('summary', str(c))}</li>" for c in contributions
-    ]) if contributions else "<li>No contributions planned/executed today.</li>"
+    def format_contribution(c):
+        if c.get('type') == 'repo':
+            details = c.get('details', {})
+            tech = ', '.join(details.get('techStack', []))
+            roadmap = details.get('roadmap', [])
+            roadmap_html = '<ul style="margin:4px 0 0 16px;">' + ''.join(f'<li>{step}</li>' for step in roadmap) + '</ul>' if roadmap else ''
+            return (
+                f"<li><b>Repository:</b> {c.get('name')}<br>"
+                f"<span style='color:#555;'>{c.get('description')}<br>Tech Stack: {tech}</span>{roadmap_html}</li>"
+            )
+        elif c.get('type') == 'branch':
+            details = c.get('details', {})
+            return (
+                f"<li><b>Branch:</b> {c.get('name')} in <b>{c.get('targetRepo')}</b><br>"
+                f"<span style='color:#555;'>{c.get('description')}<br>Starter File: {details.get('starterFile', 'N/A')}<br>Change Idea: {details.get('changeIdea', 'N/A')}</span></li>"
+            )
+        else:
+            return f"<li>{str(c)}</li>"
+
+    contribution_items = "".join([format_contribution(c) for c in contributions]) if contributions else "<li>No contributions planned/executed today.</li>"
 
     action_items = "".join([
         f"<li>{a}</li>" for a in actions
