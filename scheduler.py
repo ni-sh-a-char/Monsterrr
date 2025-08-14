@@ -94,7 +94,29 @@ def send_status_report():
     if not os.path.exists(json_path):
         with open(json_path, "w", encoding="utf-8") as jf:
             json.dump(report_json, jf, indent=2)
-    # Build HTML summary for email
+    # Build HTML summary for email with full transparency
+    idea_items = "".join([
+        f"<li><b>{i['name']}</b>: {i['description']}<br>"
+        f"<span style='color:#555;'>Tech: {', '.join(i.get('tech_stack', []) or i.get('techStack', []))} | Difficulty: {i.get('difficulty', 'N/A')} | Est. Dev Time: {i.get('estimated_dev_time', i.get('estimatedDevTime', 'N/A'))} weeks</span></li>"
+        for i in ideas
+    ]) if ideas else "<li>No ideas proposed today.</li>"
+
+    repo_items = "".join([
+        f"<li>{r.get('name', r)}</li>" for r in repos
+    ]) if repos else "<li>No repositories created today.</li>"
+
+    contribution_items = "".join([
+        f"<li>{c.get('summary', str(c))}</li>" for c in contributions
+    ]) if contributions else "<li>No contributions planned/executed today.</li>"
+
+    action_items = "".join([
+        f"<li>{a}</li>" for a in actions
+    ]) if actions else "<li>No actions taken today.</li>"
+
+    issues_items = "".join([
+        f"<li><b>{repo}</b>: {issues}</li>" for repo, issues in repo_issues.items()
+    ]) if repo_issues else "<li>No issues detected today.</li>"
+
     summary = f"""
 <div style='font-family:Segoe UI,Arial,sans-serif;max-width:600px;margin:0 auto;background:#f9f9fb;padding:32px 24px;border-radius:12px;border:1px solid #e3e7ee;'>
     <h1 style='color:#2d7ff9;margin-bottom:0.2em;'>Monsterrr Daily Executive Report</h1>
@@ -111,6 +133,17 @@ def send_status_report():
         <li><b>PR activity:</b> {prs_merged} merged, {prs_open} open</li>
         <li><b>Daily contributions planned/executed:</b> {num_contributions} (target: 3)</li>
     </ul>
+    <hr style='border:0;border-top:1px solid #e3e7ee;margin:18px 0;'>
+    <h3 style='color:#2d7ff9;'>Ideas Proposed</h3>
+    <ul>{idea_items}</ul>
+    <h3 style='color:#2d7ff9;'>Daily Plan / Contributions</h3>
+    <ul>{contribution_items}</ul>
+    <h3 style='color:#2d7ff9;'>Repositories Created</h3>
+    <ul>{repo_items}</ul>
+    <h3 style='color:#2d7ff9;'>Actions Taken</h3>
+    <ul>{action_items}</ul>
+    <h3 style='color:#2d7ff9;'>Issues Detected</h3>
+    <ul>{issues_items}</ul>
     <hr style='border:0;border-top:1px solid #e3e7ee;margin:18px 0;'>
     <p style='font-size:1em;color:#2d7ff9;'><b>Monsterrr</b> is your autonomous, always-on GitHub organization manager.<br><i>This report is generated and delivered automatically by Monsterrr AI.</i></p>
 </div>
