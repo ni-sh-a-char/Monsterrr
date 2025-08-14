@@ -9,7 +9,7 @@ Monsterrr is a multi-agent, always-on system that discovers, creates, and mainta
 - **Idea Generator Agent:** Fetches trending project ideas, summarizes and ranks them with Groq, and stores results. Loads and validates all required `.env` variables before any operation.
 - **Creator Agent:** Creates new repos, scaffolds code, commits boilerplate, and opens starter issues. Loads and validates all required `.env` variables before any operation. Fails fast if credentials are missing or invalid.
 -- **Maintainer Agent:** Monitors repos, responds to issues, auto-closes stale tickets, suggests fixes with Groq, and now plans and executes exactly 3 meaningful contributions per day (repo creation or feature branch) using Groq LLM. All actions are logged and auditable. Supports dry-run mode for safe testing. On Render, the agent creates and replaces a daily JSON plan in `logs/daily_plan_<date>.json`.
-- **Scheduler:** Runs daily/weekly jobs and sends a weekly status report email.
+-- **Scheduler:** Runs daily jobs and sends a daily status report email with quantifiable metrics (number of ideas processed, repos created, issues handled, PRs merged/open, etc.).
 - **FastAPI API:** Webhooks, manual triggers, and status endpoints.
 - **Production-ready:** Robust error handling, retries, logging, and CI/CD. All agents use structured logging and retry logic for Groq and GitHub API calls.
 
@@ -33,7 +33,16 @@ Monsterrr is a multi-agent, always-on system that discovers, creates, and mainta
 Monsterrr is ready for deployment on [Render](https://render.com/). The scheduler runs automatically and ensures:
 - **Exactly 3 contributions are planned and executed daily** (repo creation or feature branch).
 - **A daily JSON plan is created and replaced in `logs/daily_plan_<date>.json`** for audit and review.
-- **All actions are logged and status reports are sent.**
+- **All actions are logged and daily status reports are sent.**
+- **Daily status reports include quantifiable metrics:**
+	- Number of ideas processed
+	- Number of repositories created
+	- Number of issues detected and handled
+	- Number of PRs merged and open
+	- All actions taken by Monsterrr
+
+> **Caution:**
+> Monsterrr is designed for full transparency. If any metric is missing or zero, it will be shown in the daily report. For best results, ensure your organization has active ideas, issues, and PRs to process. All daily activity is quantifiable and auditable.
 
 #### Local Development
 Start the API locally:

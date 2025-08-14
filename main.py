@@ -29,6 +29,9 @@ app = FastAPI(title="Monsterrr API", description="Autonomous GitHub org manager.
 async def launch_scheduler():
     loop = asyncio.get_event_loop()
     loop.create_task(start_scheduler())
+    # Send startup email on server start
+    from scheduler import send_startup_email
+    send_startup_email()
 settings = Settings()
 logger = setup_logger()
 try:

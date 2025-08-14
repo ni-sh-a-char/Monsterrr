@@ -53,7 +53,48 @@ def send_status_report():
     prs_open = state.get('prs_open', 0)
     repo_issues = state.get('repo_issues', {})
     actions = state.get('actions', [])
+    # Quantifiable daily contributions
+    daily_plan_path = f"logs/daily_plan_{today.replace(',', '').replace(' ', '_')}.json"
+    contributions = []
+    import glob
+    # Find today's plan file (by date)
+    plan_files = glob.glob("logs/daily_plan_*.json")
+    if plan_files:
+        # Use the latest file for today
+        plan_files.sort(reverse=True)
+        try:
+            with open(plan_files[0], "r", encoding="utf-8") as pf:
+                contributions = json.load(pf)
+        except Exception:
+            contributions = []
+    num_contributions = len(contributions)
     # Compose executive summary
+    # Build status report JSON
+    report_json = {
+        "date": today,
+        "organization": settings.GITHUB_ORG,
+        "ideas_processed": len(ideas),
+        "ideas": ideas,
+        "repositories_created": len(repos),
+        "repositories": repos,
+        "issues_detected_and_actions_taken": sum(len(str(issues)) for issues in repo_issues.values()) if repo_issues else 0,
+        "repo_issues": repo_issues,
+        "actions": actions,
+        "prs_merged": prs_merged,
+        "prs_open": prs_open,
+        "daily_contributions_planned_executed": num_contributions,
+        "contributions": contributions,
+        "target_contributions": 3,
+        "status": "pending"
+    }
+    # Save JSON before sending email
+    json_path = f"logs/status_report_{today.replace(',', '').replace(' ', '_')}.json"
+    os.makedirs(os.path.dirname(json_path), exist_ok=True)
+    # Only create/replace the JSON if it doesn't exist for today
+    if not os.path.exists(json_path):
+        with open(json_path, "w", encoding="utf-8") as jf:
+            json.dump(report_json, jf, indent=2)
+    # Build HTML summary for email
     summary = f"""
 <div style='font-family:Segoe UI,Arial,sans-serif;max-width:600px;margin:0 auto;background:#f9f9fb;padding:32px 24px;border-radius:12px;border:1px solid #e3e7ee;'>
     <h1 style='color:#2d7ff9;margin-bottom:0.2em;'>Monsterrr Daily Executive Report</h1>
@@ -63,27 +104,12 @@ def send_status_report():
     </p>
     <hr style='border:0;border-top:1px solid #e3e7ee;margin:18px 0;'>
     <h2 style='color:#222;font-size:1.15em;margin-bottom:0.5em;'>Executive Summary</h2>
-    <p style='font-size:1.05em;color:#222;'>
-        Today, Monsterrr proactively monitored your organization, processed trending open-source ideas, created new repositories, and maintained existing projects. Below is a detailed account of today's activities:
-    </p>
     <ul style='line-height:1.7;font-size:1.05em;'>
-        <li><b>Ideas processed:</b>
-            <ul style='margin:0 0 0 1em;padding:0;color:#2d7ff9;'>
-                {''.join(f"<li><b>{i['name']}</b>: {i['description']}<br><span style='color:#555;'>Tech: {', '.join(i.get('tech_stack', []) or i.get('techStack', []))} | Difficulty: {i.get('difficulty', 'N/A')} | Est. Dev Time: {i.get('estimated_dev_time', i.get('estimatedDevTime', 'N/A'))} weeks</span></li>" for i in ideas)}
-            </ul>
-        </li>
-        <li><b>Repositories created:</b>
-            <ul style='margin:0 0 0 1em;padding:0;color:#2d7ff9;'>
-                {''.join(f"<li><b>{r.get('name', r)}</b></li>" for r in repos)}
-            </ul>
-        </li>
-        <li><b>Issues detected and actions taken:</b>
-            <ul style='margin:0 0 0 1em;padding:0;color:#2d7ff9;'>
-                {''.join(f"<li><b>{repo}</b>: {issues}</li>" for repo, issues in repo_issues.items()) if repo_issues else '<li>No issues detected today.</li>'}
-                {''.join(f"<li>{a}</li>" for a in actions)}
-            </ul>
-        </li>
+        <li><b>Ideas processed:</b> {len(ideas)}</li>
+        <li><b>Repositories created:</b> {len(repos)}</li>
+        <li><b>Issues detected and actions taken:</b> {sum(len(str(issues)) for issues in repo_issues.values()) if repo_issues else 0}</li>
         <li><b>PR activity:</b> {prs_merged} merged, {prs_open} open</li>
+        <li><b>Daily contributions planned/executed:</b> {num_contributions} (target: 3)</li>
     </ul>
     <hr style='border:0;border-top:1px solid #e3e7ee;margin:18px 0;'>
     <p style='font-size:1em;color:#2d7ff9;'><b>Monsterrr</b> is your autonomous, always-on GitHub organization manager.<br><i>This report is generated and delivered automatically by Monsterrr AI.</i></p>
@@ -99,17 +125,18 @@ Organization: {settings.GITHUB_ORG}
 Executive Summary:
 Today, Monsterrr proactively monitored your organization, processed trending open-source ideas, created new repositories, and maintained existing projects. Below is a detailed account of today's activities:
 
-Ideas processed:
+Ideas processed: {len(ideas)}
 {chr(10).join(f"- {i['name']}: {i['description']} [Tech: {', '.join(i.get('tech_stack', []) or i.get('techStack', []))} | Difficulty: {i.get('difficulty', 'N/A')} | Est. Dev Time: {i.get('estimated_dev_time', i.get('estimatedDevTime', 'N/A'))} weeks]" for i in ideas)}
 
-Repositories created:
+Repositories created: {len(repos)}
 {chr(10).join(f"- {r.get('name', r)}" for r in repos)}
 
-Issues detected and actions taken:
+Issues detected and actions taken: {sum(len(str(issues)) for issues in repo_issues.values()) if repo_issues else 0}
 {chr(10).join(f"- {repo}: {issues}" for repo, issues in repo_issues.items()) if repo_issues else '- No issues detected today.'}
 {chr(10).join(f"- {a}" for a in actions)}
 
 PR activity: {prs_merged} merged, {prs_open} open
+Daily contributions planned/executed: {num_contributions} (target: 3)
 
 ---
 This is an automated report from Monsterrr.
@@ -130,6 +157,8 @@ This is an automated report from Monsterrr.
             server.login(settings.SMTP_USER, settings.SMTP_PASS)
             server.sendmail(settings.SMTP_USER, settings.recipients, msg.as_string())
         logger.info("[Scheduler] Status report sent.")
+    # Do NOT replace the JSON after sending email; keep it for the day
+    # The JSON will be replaced only when a new day starts and daily_job runs again
     except Exception as e:
         logger.error(f"[Scheduler] Failed to send status report: {e}\n{traceback.format_exc()}")
 
