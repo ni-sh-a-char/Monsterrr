@@ -8,6 +8,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from typing import Dict, Any
 import base64
+import json
 
 class CreatorAgent:
     """
@@ -32,6 +33,27 @@ class CreatorAgent:
         try:
             repo = self.github_service.create_repository(repo_name, description)
             self.logger.info(f"[CreatorAgent] Repo created: {repo.get('html_url')}")
+            # Update monsterrr_state.json with new repo
+            state_path = os.path.join(os.getcwd(), "monsterrr_state.json")
+            state = {}
+            if os.path.exists(state_path):
+                with open(state_path, "r", encoding="utf-8") as f:
+                    try:
+                        state = json.load(f)
+                    except Exception:
+                        state = {}
+            repos = state.get("repos", [])
+            repo_entry = {
+                "name": repo_name,
+                "description": description,
+                "tech_stack": tech_stack,
+                "roadmap": roadmap,
+                "url": repo.get('html_url', '')
+            }
+            repos.append(repo_entry)
+            state["repos"] = repos
+            with open(state_path, "w", encoding="utf-8") as f:
+                json.dump(state, f, indent=2)
         except Exception as e:
             self.logger.error(f"[CreatorAgent] Error creating repo: {e}")
             return
