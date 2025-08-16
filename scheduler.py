@@ -314,8 +314,11 @@ async def start_scheduler():
     smtp_connectivity_check()
     # Run daily_job at UTC midnight every day
     scheduler.add_job(daily_job, "cron", hour=0, minute=0)
-    scheduler.start()
-    logger.info("Scheduler started.")
+    if not getattr(scheduler, 'running', False):
+        scheduler.start()
+        logger.info("Scheduler started.")
+    else:
+        logger.info("Scheduler already running. Skipping start().")
     # One-time startup email logic (persisted in monsterrr_state.json)
     state_path = "monsterrr_state.json"
     state = {}
