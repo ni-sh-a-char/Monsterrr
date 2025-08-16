@@ -1,41 +1,30 @@
 # Voice Command Integration Service
 
 
-from google.cloud import speech
-import io
+
+import whisper
+import os
 
 class VoiceService:
-    def __init__(self, credentials_path=None):
+    def __init__(self, model_name="base"):
         """
-        credentials_path: Path to Google Cloud credentials JSON file.
-        If None, will use default credentials.
+        model_name: Whisper model size (tiny, base, small, medium, large)
         """
-        if credentials_path:
-            from google.oauth2 import service_account
-            credentials = service_account.Credentials.from_service_account_file(credentials_path)
-            self.client = speech.SpeechClient(credentials=credentials)
-        else:
-            self.client = speech.SpeechClient()
+        self.model = whisper.load_model(model_name)
 
     def process_voice(self, audio_path):
         """
-        Processes a voice command from an audio file using Google Speech-to-Text.
+        Processes a voice command from an audio file using OpenAI Whisper.
         Args:
-            audio_path (str): Path to the audio file (WAV/FLAC/LINEAR16 recommended)
+            audio_path (str): Path to the audio file (WAV/MP3/FLAC/LINEAR16 recommended)
         Returns:
             str: Transcribed text from audio
         """
         try:
-            with io.open(audio_path, "rb") as audio_file:
-                content = audio_file.read()
-            audio = speech.RecognitionAudio(content=content)
-            config = speech.RecognitionConfig(
-                encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-                sample_rate_hertz=16000,
-                language_code="en-US",
-            )
-            response = self.client.recognize(config=config, audio=audio)
-            transcript = " ".join([result.alternatives[0].transcript for result in response.results])
+            if not os.path.exists(audio_path):
+                return f"Audio file not found: {audio_path}"
+            result = self.model.transcribe(audio_path)
+            transcript = result.get("text", "")
             return transcript if transcript else "No speech detected."
         except Exception as e:
-            return f"Voice processing error: {str(e)}"
+            return f"Voice processing error: {e}"
