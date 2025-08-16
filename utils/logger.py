@@ -9,9 +9,7 @@ import sys
 def setup_logger():
     logger = logging.getLogger("monsterrr")
     handler = logging.StreamHandler(sys.stdout)
-    formatter = logging.Formatter(
-        '{"time": "%(asctime)s", "level": "%(levelname)s", "message": "%(message)s"}'
-    )
+    formatter = logging.Formatter('{"time": "%(asctime)s", "level": "%(levelname)s", "message": "%(message)s", "event": "%(name)s", "extra": %(process)d}')
     handler.setFormatter(formatter)
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)

@@ -1,3 +1,9 @@
+import sys
+from fastapi import Request
+import requests
+import threading
+import time
+# All FastAPI endpoints must be defined after app initialization
 """
 FastAPI webhook server entrypoint for Monsterrr.
 """
@@ -57,9 +63,38 @@ class IdeaRequest(BaseModel):
 async def root():
     return {"message": "Monsterrr AI is running."}
 
+
+import threading
+import time
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+def watchdog():
+    while True:
+        time.sleep(60)
+        # Check health, restart if needed
+        try:
+            r = requests.get("http://localhost:8000/health")
+            if r.status_code != 200:
+                logger.error("Health check failed, restarting...")
+                os.execv(sys.executable, ['python'] + sys.argv)
+        except Exception as e:
+            logger.error(f"Watchdog error: {e}")
+            os.execv(sys.executable, ['python'] + sys.argv)
+
+def start_watchdog():
+    t = threading.Thread(target=watchdog, daemon=True)
+    t.start()
+
+@app.on_event("startup")
+async def launch_scheduler():
+    loop = asyncio.get_event_loop()
+    loop.create_task(start_scheduler())
+    start_watchdog()
+    from scheduler import send_startup_email
+    send_startup_email()
 
 # Manual trigger for idea agent
 @app.post("/trigger/idea-agent")
@@ -82,29 +117,92 @@ async def generate_ideas(req: IdeaRequest):
     ideas = idea_agent.fetch_and_rank_ideas(top_n=req.top_n)
     return {"ideas": ideas}
 
-@app.post("/repos/create")
-async def create_repo(background_tasks: BackgroundTasks):
-    """Trigger repo creation for top idea."""
-    def _create():
-        ideas = idea_agent.fetch_and_rank_ideas(top_n=1)
-        if ideas:
-            creator_agent.create_repository(ideas[0])
-    background_tasks.add_task(_create)
-    return {"status": "Repository creation started."}
+
+@app.post("/webhook/github")
+async def github_webhook(request: Request):
+    payload = await request.json()
+    event = request.headers.get("X-GitHub-Event", "unknown")
+    repo = payload.get("repository", {}).get("name")
+    # Smart event handling
+    if event == "issues":
+        action = payload.get("action")
+        issue = payload.get("issue", {})
+        if action == "opened":
+            suggestion = groq.groq_llm(f"Suggest a fix for this GitHub issue: {issue.get('title')}")
+            github.create_issue(repo, title=f"Automated suggestion for issue #{issue.get('number')}", body=suggestion, labels=["bot-suggestion"])
+            logger.info(f"[Webhook] Suggested fix for new issue in {repo}")
+        elif action == "closed":
+            logger.info(f"[Webhook] Issue closed in {repo}: {issue.get('title')}")
+        elif action == "reopened":
+            logger.info(f"[Webhook] Issue reopened in {repo}: {issue.get('title')}")
+        elif action == "commented":
+            comment = payload.get("comment", {})
+            reply = groq.groq_llm(f"Reply to this GitHub issue comment: {comment.get('body')}")
+            github.comment_on_issue(repo, issue.get('number'), reply)
+    elif event == "issue_comment":
+        comment = payload.get("comment", {})
+        issue = payload.get("issue", {})
+        reply = groq.groq_llm(f"Reply to this GitHub issue comment: {comment.get('body')}")
+        github.comment_on_issue(repo, issue.get('number'), reply)
+    elif event == "pull_request":
+        action = payload.get("action")
+        pr = payload.get("pull_request", {})
+        if action == "opened":
+            logger.info(f"[Webhook] New PR opened in {repo}: {pr.get('title')}")
+            github.add_labels_to_pr(repo, pr.get('number'), ["needs-review", "AI-checked"])
+            review = groq.groq_llm(f"Review this PR: {pr.get('title')}\n{pr.get('body')}")
+            github.comment_on_pr(repo, pr.get('number'), review)
+        elif action == "closed":
+            logger.info(f"[Webhook] PR closed in {repo}: {pr.get('title')}")
+        elif action == "reopened":
+            logger.info(f"[Webhook] PR reopened in {repo}: {pr.get('title')}")
+        elif action == "commented":
+            comment = payload.get("comment", {})
+            reply = groq.groq_llm(f"Reply to this PR comment: {comment.get('body')}")
+            github.comment_on_pr(repo, pr.get('number'), reply)
+    elif event == "push":
+        logger.info(f"[Webhook] Push event in {repo}")
+        github.trigger_code_analysis(repo)
+    elif event == "repository":
+        action = payload.get("action")
+        if action == "created":
+            logger.info(f"[Webhook] New repository created: {repo}")
+            github.onboard_new_repo(repo)
+    elif event == "star":
+        user = payload.get("sender", {}).get("login")
+        logger.info(f"[Webhook] Repo {repo} starred by {user}")
+        github.thank_user_for_star(repo, user)
+    elif event == "fork":
+        user = payload.get("sender", {}).get("login")
+        logger.info(f"[Webhook] Repo {repo} forked by {user}")
+        github.thank_user_for_fork(repo, user)
 
 
-# Manual trigger for all agents (idea, creator, maintainer)
-@app.post("/run-agents")
-async def run_all_agents(background_tasks: BackgroundTasks):
-    """Trigger all agents manually."""
+@app.post("/maintenance/run")
+async def run_maintenance(background_tasks: BackgroundTasks):
     def _run():
-        ideas = idea_agent.fetch_and_rank_ideas(top_n=1)
-        if ideas:
-            creator_agent.create_repository(ideas[0])
         maintainer_agent.perform_maintenance()
     background_tasks.add_task(_run)
-    return {"status": "All agents triggered."}
+    return {"status": "Maintenance started."}
+
+@app.post("/analyze/repo")
+async def analyze_repo(repo_name: str):
+    health = github.analyze_repo_health(repo_name)
+    return {"repo": repo_name, "health": health}
+
+@app.post("/suggest/issue")
+async def suggest_issue_fix(repo: str, issue_number: int):
+    issue = github.get_issue(repo, issue_number)
+    suggestion = groq.groq_llm(f"Suggest a fix for this GitHub issue: {issue.get('title')}")
+    return {"issue": issue.get('title'), "suggestion": suggestion}
 
 if __name__ == "__main__":
+    # --- Auto-start Discord Bot (Jarvis style) ---
+    import multiprocessing
+    def start_discord_bot():
+        from services.discord_bot import bot, settings
+        bot.run(settings.DISCORD_BOT_TOKEN)
+    discord_process = multiprocessing.Process(target=start_discord_bot)
+    discord_process.start()
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000)

@@ -1,3 +1,4 @@
+![Monsterrr Logo](Monsterrr.png)
 # Monsterrr
 
 ## 🚀 Autonomous AI for GitHub Organization Management
@@ -89,6 +90,47 @@ Monsterrr is a multi-agent, production-ready system that discovers, creates, and
   - Actions taken
   - Issues detected
 - All actions are logged and auditable.
+
+---
+
+## Discord Integration (Jarvis Mode)
+Monsterrr now includes a professional Discord bot for real-time guidance, hourly updates, and AI-powered command execution—just like Jarvis in Iron Man.
+
+### Features
+- **Hourly Discord Notifications:** Get a summary of actions, suggestions, and pending tasks every hour in your chosen channel.
+- **Daily Status Report:** Full daily report sent to Discord and email.
+- **AI Command Handling:** Guide, override, or correct the 3 daily contributions using natural language commands.
+- **Super Professional Responses:** All bot messages are branded and formal, Jarvis-style.
+
+### Setup
+1. **Add Discord Bot Credentials to `.env`**
+   ```ini
+   DISCORD_BOT_TOKEN=your-bot-token
+   DISCORD_GUILD_ID=your-guild-id
+   DISCORD_CHANNEL_ID=your-channel-id
+   ```
+2. **Invite the bot to your Discord server:**
+   - Go to https://discord.com/developers/applications, create an app, add a bot, and copy the token.
+   - Use the OAuth2 URL with 'bot' and 'message content' permissions to invite the bot to your server/channel.
+3. **Install dependencies:**
+   ```sh
+   pip install -r requirements.txt
+   ```
+4. **Run Monsterrr:**
+   ```sh
+   python main.py
+   ```
+   The Discord bot will auto-start and operate in your specified channel.
+
+### Discord Commands
+- `!guide` — Show all available commands and usage instructions.
+- `!status` — Get current Monsterrr system status.
+- `!ideas` — View top AI-generated ideas.
+- `!contribute <instructions>` — Guide or override the 3 daily contributions (e.g., prioritize, skip, fix).
+- `!fix <issue/pr>` — Suggest or apply a fix for a specific issue or PR.
+- `!skip <repo/issue>` — Skip a repo or issue in the next contributions.
+
+**You can use natural language. If no instructions are given, Monsterrr will always execute 3 contributions per day by default.**
 
 ---
 

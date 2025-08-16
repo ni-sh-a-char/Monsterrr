@@ -1,3 +1,28 @@
+# Background monitoring tasks
+import asyncio
+from services.github_service import GitHubService
+from utils.logger import setup_logger
+github = GitHubService(logger=setup_logger())
+
+async def monitor_org_health():
+    while True:
+        # Check for stale issues
+        stale_issues = github.find_stale_issues()
+        for issue in stale_issues:
+            github.close_issue(issue['repo'], issue['number'])
+            github.comment_on_issue(issue['repo'], issue['number'], "Closed due to inactivity.")
+        # Check for safe PRs to auto-merge
+        safe_prs = github.find_safe_prs()
+        for pr in safe_prs:
+            github.merge_pr(pr['repo'], pr['number'])
+            github.comment_on_pr(pr['repo'], pr['number'], "Auto-merged by Monsterrr.")
+        # Check for repo activity and security
+        github.audit_repos()
+        await asyncio.sleep(3600)  # Run every hour
+
+def start_background_monitoring():
+    loop = asyncio.get_event_loop()
+    loop.create_task(monitor_org_health())
 """
 Production scheduler for Monsterrr: daily jobs, status report email, robust logging, and one-time startup email.
 """
