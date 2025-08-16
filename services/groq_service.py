@@ -32,7 +32,8 @@ class GroqService:
         self.max_retries = max_retries
         self.timeout = timeout
         redacted_key = self.api_key[:6] + "..." + self.api_key[-4:]
-        self.logger.info(f"[GroqService] Initialized with model: {self.model}, API key: {redacted_key}")
+        if self.logger:
+            self.logger.info(f"[GroqService] Initialized with model: {self.model}, API key: {redacted_key}")
 
 
     def groq_llm(self, prompt: str, model: Optional[str] = None, system_prompt: Optional[str] = None, stream: bool = False, expect_json: bool = False, **kwargs) -> str:

@@ -21,10 +21,12 @@ class BaseService:
         self.logger = logger
 
     def log_request(self, method: str, url: str, **kwargs):
-        self.logger.info(f"[GitHubService] {method} {url} | kwargs: { {k: v for k, v in kwargs.items() if k != 'headers'} }")
+        if self.logger:
+            self.logger.info(f"[GitHubService] {method} {url} | kwargs: { {k: v for k, v in kwargs.items() if k != 'headers'} }")
 
     def log_response(self, resp: httpx.Response):
-        self.logger.info(f"[GitHubService] Response {resp.status_code} {resp.url}")
+        if self.logger:
+            self.logger.info(f"[GitHubService] Response {resp.status_code} {resp.url}")
 
     def handle_error(self, resp: httpx.Response):
         if resp.status_code == 403 and 'X-RateLimit-Remaining' in resp.headers and resp.headers['X-RateLimit-Remaining'] == '0':

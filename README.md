@@ -3,6 +3,33 @@
 
 ## 🚀 Autonomous AI for GitHub Organization Management
 
+---
+
+## 🚀 Render Deployment Instructions
+
+Monsterrr is production-ready for Render. To deploy:
+
+1. **Connect your GitHub repo to Render.**
+2. **Add environment variables** from `.env` to Render's dashboard (never commit secrets).
+3. **Ensure your repo contains:**
+   - `Procfile` (web and worker entries)
+   - `render.yaml` (web and worker services)
+   - `requirements.txt`
+   - All source code in the repo root.
+4. **Render will auto-detect and run:**
+   - FastAPI API (`web`): `uvicorn main:app --host 0.0.0.0 --port 8000`
+   - Discord bot (`worker`): `python -m services.discord_bot_runner`
+
+**No manual intervention required.**
+
+For local development, use:
+```powershell
+set PYTHONPATH=C:\Projects\Monsterrr
+python -m honcho start
+```
+
+---
+
 Monsterrr is a multi-agent, production-ready system that discovers, creates, and maintains open-source projects for your GitHub organization. Powered by Groq LLM, Monsterrr automates daily planning, contribution execution, and professional reporting—keeping your org healthy and growing 24/7.
 
 ---

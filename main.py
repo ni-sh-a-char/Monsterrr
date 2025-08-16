@@ -96,6 +96,27 @@ async def launch_scheduler():
     from scheduler import send_startup_email
     send_startup_email()
 
+# Start Discord bot in a background thread when FastAPI launches
+def start_discord_bot():
+    from services.discord_bot import bot
+    import os
+    token = os.getenv("DISCORD_BOT_TOKEN")
+    if token:
+        bot.run(token)
+    else:
+        print("DISCORD_BOT_TOKEN not set!")
+
+@app.on_event("startup")
+async def launch_scheduler():
+    loop = asyncio.get_event_loop()
+    loop.create_task(start_scheduler())
+    # Send startup email on server start
+    from scheduler import send_startup_email
+    send_startup_email()
+    # Start Discord bot thread
+    discord_thread = threading.Thread(target=start_discord_bot, daemon=True)
+    discord_thread.start()
+
 # Manual trigger for idea agent
 @app.post("/trigger/idea-agent")
 async def trigger_idea_agent():

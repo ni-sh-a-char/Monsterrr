@@ -4,4 +4,9 @@ services:
     name: monsterrr-api
     runtime: python
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "uvicorn monsterrr.main:app --host 0.0.0.0 --port 8000"
+    startCommand: "uvicorn main:app --host 0.0.0.0 --port 8000"
+  - type: worker
+    name: monsterrr-discord
+    runtime: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python -m services.discord_bot_runner"

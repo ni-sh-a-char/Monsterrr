@@ -24,19 +24,48 @@ import socket
 import datetime
 from collections import defaultdict, deque
 import asyncio
+# Monsterrr services
+from .task_manager import TaskManager
+from .triage_service import TriageService
+from .poll_service import PollService
+from .report_service import ReportService
+from .recognition_service import RecognitionService
+from .qa_service import QAService
+from .security_service import SecurityService
+from .roadmap_service import RoadmapService
+from .onboarding_service import OnboardingService
+from .merge_service import MergeService
+from .language_service import LanguageService
+from .doc_service import DocService
+from .conversation_memory import ConversationMemory
+from .integration_service import IntegrationService
+from .github_service import GitHubService
+from .groq_service import GroqService
 
 MEMORY_LIMIT = 10
 conversation_memory = defaultdict(lambda: deque(maxlen=MEMORY_LIMIT))
 STARTUP_TIME = datetime.datetime.utcnow()
 total_messages = 0
 unique_users = set()
-# --- Global Data Structures for Features ---
-task_assignments = defaultdict(list)
-polls = []
-contributor_stats = defaultdict(int)
-security_alerts = []
-custom_commands = {}
-qa_sessions = []
+
+# --- Service Instances ---
+task_manager = TaskManager()
+triage_service = TriageService()
+poll_service = PollService()
+report_service = ReportService()
+recognition_service = RecognitionService()
+qa_service = QAService()
+security_service = SecurityService()
+roadmap_service = RoadmapService()
+onboarding_service = OnboardingService()
+merge_service = MergeService()
+language_service = LanguageService()
+doc_service = DocService()
+conversation_memory_service = ConversationMemory()
+integration_service = IntegrationService()
+# github_service and groq_service require logger, use None for now
+github_service = GitHubService(logger=None)
+groq_service = GroqService(logger=None)
 
 
 # ...existing code...
@@ -95,69 +124,91 @@ Ready to help!
 # 2. Task Assignment & Tracking
 @bot.command(name="assign")
 async def assign_task(ctx, user: discord.Member, *, task: str):
-    # TODO: Assign task to user, track progress, send reminders
+    task_manager.assign_task(str(user), task)
     await ctx.send(f"Task assigned to {user.mention}: {task}")
 
 # 3. Automated Issue & PR Triage
 @bot.command(name="triage")
-async def triage_issues(ctx):
-    # TODO: Use AI to label, prioritize, and assign issues/PRs
-    await ctx.send("Issue & PR triage started.")
+async def triage_issues(ctx, *, issue_text: str = None):
+    if not issue_text:
+        await ctx.send("Please provide issue text.")
+        return
+    result = triage_service.triage_issue(issue_text)
+    await ctx.send(f"Triage result: {result}")
 
 # 4. Project Roadmap Generation
 @bot.command(name="roadmap")
-async def generate_roadmap(ctx):
-    # TODO: Generate and update project roadmap
-    await ctx.send("Project roadmap generated.")
+async def generate_roadmap(ctx, *, project: str = "Monsterrr"): 
+    roadmap = roadmap_service.generate_roadmap(project)
+    await ctx.send("\n".join(roadmap))
 
 # 5. Contributor Recognition
 @bot.command(name="recognize")
-async def recognize_contributors(ctx):
-    # TODO: Send thank-you messages, badges, highlights
-    await ctx.send("Top contributors recognized!")
+async def recognize_contributors(ctx, user: discord.Member = None):
+    if user:
+        msg = recognition_service.recognize(str(user))
+        await ctx.send(msg)
+    else:
+        await ctx.send("Please mention a user to recognize.")
 
 # 6. Weekly/Monthly Executive Reports
 @bot.command(name="report")
 async def executive_report(ctx, period: str = "weekly"):
-    # TODO: Summarize org activity, contributions, metrics
-    await ctx.send(f"{period.capitalize()} executive report sent.")
+    report = report_service.generate_report(period)
+    await ctx.send(report)
 
 # 7. Real-Time Alerts
 @bot.command(name="alerts")
 async def real_time_alerts(ctx):
-    # TODO: Notify on critical events
-    await ctx.send("Real-time alerts enabled.")
+    await ctx.send("Real-time alerts enabled. (Demo)")
 
 # 8. Idea Voting & Polls
 @bot.command(name="poll")
 async def idea_poll(ctx, *, question: str):
-    # TODO: Let users vote on ideas/features
-    await ctx.send(f"Poll started: {question}")
+    poll = poll_service.create_poll(question, ["Yes", "No", "Maybe"])
+    await ctx.send(f"Poll started: {poll['question']}\nOptions: {', '.join(poll['options'])}")
 
+@bot.command(name="ideas")
+async def ideas_command(ctx):
+    polls = poll_service.polls
+    if not polls:
+        await ctx.send("No ideas/polls found.")
+        return
+    msg = "Active Ideas/Polls:\n" + "\n".join([f"{i+1}. {p['question']}" for i, p in enumerate(polls)])
+    await ctx.send(msg)
 # 9. Automated Documentation Updates
 @bot.command(name="status")
 async def status(ctx):
-    """Show detailed bot/org/system status and next actions."""
-    global task_assignments, polls, contributor_stats, security_alerts, custom_commands, qa_sessions
     user_id = str(ctx.author.id)
     context = get_system_context(user_id)
     guild_count = len(bot.guilds)
     member_count = sum(guild.member_count for guild in bot.guilds)
-    # Example next actions and recent actions
-    next_actions = [
-        "Monitor new issues and PRs",
-        "Send onboarding to new contributors",
-        "Run hourly analytics and reporting",
-        "Check for security alerts",
-        "Update documentation if needed"
-    ]
-    recent_actions = [
-        f"Processed {total_messages} messages",
-        f"Assigned {sum(len(tasks) for tasks in task_assignments.values())} tasks",
-        f"Created {len(polls)} polls",
-        f"Recognized {len(contributor_stats)} contributors",
-        f"Sent {len(security_alerts)} security alerts"
-    ]
+    next_actions = ["Monitor new issues and PRs", "Send onboarding to new contributors", "Run hourly analytics and reporting", "Check for security alerts", "Update documentation if needed"]
+    recent_actions = [f"Processed {total_messages} messages", f"Assigned {len(task_manager.get_tasks())} tasks", f"Created {len(poll_service.polls)} polls", f"Recognized {len(recognition_service.log)} contributors", f"Sent {len(security_service.log)} security alerts"]
+    status_text = f"""
+    **🤖 Monsterrr System Status**
+    {context}
+
+    **Discord Stats:**
+    • Guilds: {guild_count}
+    • Total members: {member_count}
+    • Unique users interacted: {len(unique_users)}
+
+    **Recent Actions:**
+    • " + "\n• ".join(recent_actions) + "\n"
+
+    **Next Actions:**
+    • " + "\n• ".join(next_actions) + "\n"
+
+    **Active Features:**
+    • Tasks assigned: {len(task_manager.get_tasks())}
+    • Active polls: {len(poll_service.polls)}
+    • Custom commands: {len(custom_commands)}
+    • Security alerts: {len(security_service.log)}
+    • QA sessions scheduled: {len(qa_service.sessions)}
+    """
+    embed = format_embed("Monsterrr Detailed Status", status_text, 0x00ff00)
+    await ctx.send(embed=embed)
     status_text = f"""
     **🤖 Monsterrr System Status**
     {context}
@@ -182,45 +233,54 @@ async def status(ctx):
     """
     embed = format_embed("Monsterrr Detailed Status", status_text, 0x00ff00)
     await ctx.send(embed=embed)
+
+@bot.command(name="analytics")
 async def analytics_dashboard(ctx):
-    # TODO: Visualize org health, contributions, trends
-    await ctx.send("Analytics dashboard generated.")
+    await ctx.send("Analytics dashboard generated. (Demo)")
 
 # 14. Auto-merge & Auto-close Rules
 @bot.command(name="automerge")
-async def auto_merge(ctx):
-    # TODO: Smart rules for merging PRs/closing issues
-    await ctx.send("Auto-merge/close rules applied.")
+async def auto_merge(ctx, pr: str = None):
+    if not pr:
+        await ctx.send("Please provide PR identifier.")
+        return
+    msg = merge_service.auto_merge(pr)
+    await ctx.send(msg)
 
 # 15. Onboarding Automation
 @bot.command(name="onboard")
 async def onboarding(ctx, user: discord.Member):
-    # TODO: Guide new contributors with onboarding
-    await ctx.send(f"Onboarding started for {user.mention}.")
+    msg = onboarding_service.onboard(str(user))
+    await ctx.send(msg)
 
 # 16. Custom Command Builder
 @bot.command(name="customcmd")
 async def custom_command(ctx, name: str, *, action: str):
-    # TODO: Let users define new commands/workflows
+    custom_commands[name] = action
     await ctx.send(f"Custom command '{name}' created.")
 
 # 17. Security & Compliance Monitoring
 @bot.command(name="security")
-async def security_scan(ctx):
-    # TODO: Scan repos for secrets, vulnerabilities, compliance
-    await ctx.send("Security & compliance scan started.")
+async def security_scan(ctx, repo_path: str = "."):
+    findings = security_service.scan_repo(repo_path)
+    if findings:
+        await ctx.send("Security findings:\n" + "\n".join(findings))
+    else:
+        await ctx.send("No security issues found.")
 
 # 18. AI-Powered Code Review
 @bot.command(name="codereview")
 async def code_review(ctx, pr_id: str):
-    # TODO: Provide feedback/suggestions on PRs using LLMs
-    await ctx.send(f"Code review started for PR {pr_id}.")
+    await ctx.send(f"Code review started for PR {pr_id}. (Demo)")
 
 # 19. Multi-language Support
 @bot.command(name="language")
-async def set_language(ctx, lang: str):
-    # TODO: Respond/operate in multiple languages
-    await ctx.send(f"Language set to {lang}.")
+async def set_language(ctx, lang: str, *, text: str = None):
+    if not text:
+        await ctx.send(f"Language set to {lang}.")
+        return
+    translation = language_service.translate(text, lang)
+    await ctx.send(f"Translation: {translation}")
 
 # =============================
 
@@ -276,8 +336,8 @@ def get_system_context(user_id=None):
     return context
 
 # --- Professional Embed Helper ---
-def format_embed(title, description):
-    embed = discord.Embed(title=title, description=description, color=0x2d7ff9)
+def format_embed(title, description, color=0x2d7ff9):
+    embed = discord.Embed(title=title, description=description, color=color)
     embed.set_footer(text=f"Monsterrr • Status at: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}")
     return embed
 
