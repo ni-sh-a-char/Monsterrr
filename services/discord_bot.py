@@ -19,10 +19,10 @@ from services.analytics_service import AnalyticsService
 from services.merge_service import MergeService
 from services.onboarding_service import OnboardingService
 from services.command_builder import CommandBuilder
+from services.language_service import LanguageService
 from services.security_service import SecurityService
 from services.code_review_service import CodeReviewService
-from services.language_service import LanguageService
-from services.voice_service import VoiceService
+
 
 settings = Settings()
 DISCORD_GUILD_ID = int(settings.DISCORD_GUILD_ID)
@@ -45,7 +45,6 @@ command_builder = CommandBuilder()
 security_service = SecurityService()
 code_review_service = CodeReviewService()
 language_service = LanguageService()
-voice_service = VoiceService()
 # Poll command
 @bot.command(name="poll")
 async def poll_cmd(ctx, question: str, *options):
@@ -136,12 +135,6 @@ async def translate_cmd(ctx, lang: str, *, text: str):
         result = language_service.translate(text, lang)
         await send_monsterrr_message(ctx.channel, f"Translation ({lang})", result)
 
-# Voice command integration
-@bot.command(name="voice")
-async def voice_cmd(ctx, audio: str):
-    if await is_authorized(ctx):
-        result = voice_service.process_voice(audio)
-        await send_monsterrr_message(ctx.channel, "Voice Command", result)
 from services.triage_service import TriageService
 from services.roadmap_service import RoadmapService
 from services.recognition_service import RecognitionService

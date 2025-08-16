@@ -15,4 +15,4 @@ loguru
 pydantic-settings
 tenacity
 discord.py
-openai-whisper  # OpenAI Whisper for voice transcription
+translate
