@@ -197,9 +197,9 @@ async def suggest_issue_fix(repo: str, issue_number: int):
     return {"issue": issue.get('title'), "suggestion": suggestion}
 
 if __name__ == "__main__":
-    import multiprocessing
+    import threading
     from services.discord_bot_runner import run as start_discord_bot
-    discord_process = multiprocessing.Process(target=start_discord_bot)
-    discord_process.start()
+    discord_thread = threading.Thread(target=start_discord_bot, daemon=True)
+    discord_thread.start()
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000)

@@ -1,4 +1,5 @@
 # Production Dockerfile for Monsterrr
+
 FROM python:3.11-slim
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -14,4 +15,6 @@ RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 # Copy app code
 COPY . .
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+# Start both FastAPI and Discord bot from main.py
+CMD ["python", "main.py"]
