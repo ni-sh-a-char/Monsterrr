@@ -8,11 +8,36 @@ Monsterrr is a multi-agent, production-ready system that discovers, creates, and
 ---
 
 ## Features
+
 - **AI-Driven Daily Planning:** Plans and executes exactly 3 meaningful contributions per day (repo creation or feature branch).
 - **Multi-Agent Architecture:** Includes MaintainerAgent, CreatorAgent, and IdeaGeneratorAgent for full org automation.
 - **Professional Daily Status Reports:** Sends quantifiable, transparent email reports with all ideas, actions, and metrics.
 - **Audit Logging:** All actions and plans are saved for review and compliance.
 - **Production-Ready:** Robust error handling, `.env`-only config, and seamless deployment to Render or Docker.
+
+---
+
+## Advanced Features
+- **Conversation Memory:** Remembers previous user interactions for context-aware responses and follow-up actions.
+- **Task Assignment & Tracking:** Assigns tasks to contributors, tracks progress, and sends reminders via Discord and email.
+- **Automated Issue & PR Triage:** Uses AI to label, prioritize, and assign issues/PRs automatically.
+- **Project Roadmap Generation:** Generates and updates project roadmaps based on org goals and activity.
+- **Contributor Recognition:** Sends automated thank-you messages, badges, or highlights for top contributors.
+- **Weekly/Monthly Executive Reports:** Summarizes org activity, contributions, and metrics in professional reports.
+- **Real-Time Alerts:** Notifies on critical events (security, failed CI, stale PRs) in Discord and email.
+- **Idea Voting & Polls:** Lets users vote on new ideas or features directly in Discord.
+- **Automated Documentation Updates:** Uses AI to update README, changelogs, and contributor guides.
+- **Customizable AI Agents:** Allows users to create and configure new agents for specific org needs.
+- **Integration with Other Platforms:** Slack, Trello, Jira, Notion, etc. for cross-platform org management.
+- **Scheduled Q&A Sessions:** Hosts regular Q&A or office hours in Discord, powered by AI.
+- **Advanced Analytics Dashboard:** Visualizes org health, contributions, and trends via web or Discord embeds.
+- **Auto-merge & Auto-close Rules:** Smart rules for merging PRs or closing issues based on org policies.
+- **Onboarding Automation:** Guides new contributors with personalized onboarding messages and tasks.
+- **Custom Command Builder:** Lets users define new commands and workflows via Discord.
+- **Security & Compliance Monitoring:** Scans repos for secrets, vulnerabilities, and compliance issues.
+- **AI-Powered Code Review:** Provides feedback and suggestions on PRs using LLMs.
+- **Multi-language Support:** Responds and operates in multiple languages for global teams.
+- **Voice Command Integration:** Uses Discord voice channels for spoken commands and responses.
 
 ---
 
@@ -94,13 +119,35 @@ Monsterrr is a multi-agent, production-ready system that discovers, creates, and
 ---
 
 ## Discord Integration (Jarvis Mode)
-Monsterrr now includes a professional Discord bot for real-time guidance, hourly updates, and AI-powered command execution—just like Jarvis in Iron Man.
+
+Monsterrr now includes a professional Discord bot for real-time guidance, hourly updates, and AI-powered command execution.
 
 ### Features
+
 - **Hourly Discord Notifications:** Get a summary of actions, suggestions, and pending tasks every hour in your chosen channel.
 - **Daily Status Report:** Full daily report sent to Discord and email.
 - **AI Command Handling:** Guide, override, or correct the 3 daily contributions using natural language commands.
-- **Super Professional Responses:** All bot messages are branded and formal, Jarvis-style.
+- **Professional Responses:** All bot messages are branded and formal.
+- **Conversation Memory:** Context-aware, self-aware responses in natural language.
+- **Task Assignment & Tracking:** Assign and track tasks for contributors.
+- **Automated Issue & PR Triage:** AI-powered triage for issues and PRs.
+- **Project Roadmap Generation:** Generate and update project roadmaps.
+- **Contributor Recognition:** Automated thank-you and highlights for contributors.
+- **Executive Reports:** Daily, weekly, and monthly reports via Discord and email.
+- **Real-Time Alerts:** Notifications for critical events.
+- **Idea Voting & Polls:** Create and vote on ideas/features in Discord.
+- **Automated Documentation Updates:** AI-powered updates to docs and guides.
+- **Customizable AI Agents:** Create/configure new agents for org needs.
+- **Integrations:** Slack, Trello, Jira, Notion, and more.
+- **Scheduled Q&A Sessions:** Host Q&A/office hours in Discord.
+- **Analytics Dashboard:** Visualize org health and contributions.
+- **Auto-merge & Auto-close:** Smart rules for PRs/issues.
+- **Onboarding Automation:** Personalized onboarding for new contributors.
+- **Custom Command Builder:** Define new commands/workflows via Discord.
+- **Security & Compliance Monitoring:** Scan for secrets/vulnerabilities.
+- **AI-Powered Code Review:** LLM feedback on PRs.
+- **Multi-language Support:** Respond in multiple languages.
+- **Voice Command Integration:** Use Discord voice channels for spoken commands.
 
 ### Setup
 1. **Add Discord Bot Credentials to `.env`**
@@ -123,6 +170,8 @@ Monsterrr now includes a professional Discord bot for real-time guidance, hourly
    The Discord bot will auto-start and operate in your specified channel.
 
 ### Discord Commands
+
+**Core Commands:**
 - `!guide` — Show all available commands and usage instructions.
 - `!status` — Get current Monsterrr system status.
 - `!ideas` — View top AI-generated ideas.
@@ -130,7 +179,31 @@ Monsterrr now includes a professional Discord bot for real-time guidance, hourly
 - `!fix <issue/pr>` — Suggest or apply a fix for a specific issue or PR.
 - `!skip <repo/issue>` — Skip a repo or issue in the next contributions.
 
-**You can use natural language. If no instructions are given, Monsterrr will always execute 3 contributions per day by default.**
+**Advanced Commands:**
+- `!assign <user> <task>` — Assign a task to a contributor.
+- `!tasks [user]` — View tasks for a user or all users.
+- `!triage <issue|pr> <item>` — AI-powered triage for issues/PRs.
+- `!roadmap <project>` — Generate a roadmap for a project.
+- `!recognize <user>` — Send contributor recognition.
+- `!report [daily|weekly|monthly]` — Executive reports.
+- `!alert <event>` — Send a real-time alert.
+- `!poll <question> <option1> <option2> ...` — Create a poll.
+- `!docs <repo>` — Update documentation for a repo.
+- `!custom <instruction>` — Use a customizable AI agent.
+- `!integrate <platform>` — Integrate with other platforms.
+- `!qa <time>` — Schedule a Q&A session.
+- `!analytics` — View analytics dashboard.
+- `!merge <pr>` — Auto-merge a PR.
+- `!close <issue>` — Auto-close an issue.
+- `!onboard <user>` — Onboard a new contributor.
+- `!command <name> <action>` — Create a custom command.
+- `!scan <repo>` — Security scan for a repo.
+- `!review <pr>` — AI-powered code review.
+- `!translate <lang> <text>` — Translate text to another language.
+- `!voice <audio>` — Process a voice command.
+
+**Natural Language:**
+You can converse with Monsterrr in natural language. The bot will understand context, remember your history, and respond intelligently.
 
 ---
 

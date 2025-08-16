@@ -15,3 +15,5 @@ loguru
 pydantic-settings
 tenacity
 discord.py
+google-cloud-speech
+google-auth
