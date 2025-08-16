@@ -25,25 +25,49 @@ async def on_ready():
     print(f"Monsterrr Discord Bot is online as {bot.user}")
     hourly_status_report.start()
 
-# --- Jarvis-style professional responses ---
-JARVIS_PREFIX = "[Jarvis | Monsterrr] "
+# --- Monsterrr professional responses ---
+MONSTERRR_PREFIX = "[Monsterrr] "
 
-async def send_jarvis_message(channel, message):
-    await channel.send(f"{JARVIS_PREFIX}{message}")
+def format_professional_embed(title, description, fields=None):
+    embed = discord.Embed(title=title, description=description, color=0x2d7ff9)
+    if fields:
+        for name, value in fields:
+            embed.add_field(name=name, value=value, inline=False)
+    embed.set_footer(text="Monsterrr • Autonomous GitHub Org Manager")
+    return embed
+
+async def send_monsterrr_message(channel, title, description, fields=None):
+    embed = format_professional_embed(title, description, fields)
+    await channel.send(embed=embed)
 
 @tasks.loop(hours=1)
 async def hourly_status_report():
-    # Generate status summary
     status = get_monsterrr_status()
-    global last_hourly_status
-    last_hourly_status = status
-    # Send only to the specified channel
     guild = bot.get_guild(DISCORD_GUILD_ID)
     if guild:
         channel = guild.get_channel(DISCORD_CHANNEL_ID)
         if channel:
             try:
-                await send_jarvis_message(channel, f"Hourly Update:\n{status}")
+                # Parse status JSON and format visually
+                import json
+                try:
+                    status_data = json.loads(status)
+                except Exception:
+                    status_data = {}
+                title = "Hourly Update"
+                description = "Here's what Monsterrr accomplished in the last hour."
+                fields = []
+                if 'ideas' in status_data:
+                    ideas = status_data['ideas'].get('top_ideas', [])
+                    ideas_str = '\n'.join([f"• **{i['name']}**: {i['description']}" for i in ideas]) or "No ideas generated."
+                    fields.append(("Top Ideas", ideas_str))
+                if 'repos' in status_data:
+                    repos = status_data['repos']
+                    repos_str = '\n'.join([f"• [{r['name']}]({r.get('url', '')})" for r in repos]) or "No repositories created."
+                    fields.append(("Repositories Created", repos_str))
+                if 'startup_email_sent' in status_data:
+                    fields.append(("Startup Email", "Sent" if status_data['startup_email_sent'] else "Not Sent"))
+                await send_monsterrr_message(channel, title, description, fields)
             except Exception:
                 pass
 
@@ -54,7 +78,24 @@ async def is_authorized(ctx):
 @bot.command(name="status")
 async def status_cmd(ctx):
     if await is_authorized(ctx):
-        await send_jarvis_message(ctx.channel, f"Current system status:\n{get_monsterrr_status()}")
+        status = get_monsterrr_status()
+        import json
+        try:
+            status_data = json.loads(status)
+        except Exception:
+            status_data = {}
+        title = "Current System Status"
+        description = "Monsterrr is running and ready to assist."
+        fields = []
+        if 'ideas' in status_data:
+            ideas = status_data['ideas'].get('top_ideas', [])
+            ideas_str = '\n'.join([f"• **{i['name']}**: {i['description']}" for i in ideas]) or "No ideas generated."
+            fields.append(("Top Ideas", ideas_str))
+        if 'repos' in status_data:
+            repos = status_data['repos']
+            repos_str = '\n'.join([f"• [{r['name']}]({r.get('url', '')})" for r in repos]) or "No repositories created."
+            fields.append(("Repositories Created", repos_str))
+        await send_monsterrr_message(ctx.channel, title, description, fields)
 
 @bot.command(name="guide")
 async def guide_cmd(ctx):
@@ -69,7 +110,11 @@ async def guide_cmd(ctx):
             "- !help : Show this guide\n"
             "You may instruct me in natural language. I will interpret and execute your wishes."
         )
-        await send_jarvis_message(ctx.channel, guide)
+        await send_monsterrr_message(
+            ctx.channel,
+            "Monsterrr Guide",
+            guide
+        )
 
 @bot.command(name="contribute")
 async def contribute_cmd(ctx, *, instructions: str):
@@ -79,26 +124,26 @@ async def contribute_cmd(ctx, *, instructions: str):
         decision = groq.groq_llm(f"Monsterrr user instructions: {instructions}")
         # Apply decision to daily contributions
         # ... integrate with agent logic ...
-        await send_jarvis_message(ctx.channel, f"Instructions received and will be followed: {decision}")
+        await send_monsterrr_message(ctx.channel, f"Instructions received and will be followed: {decision}")
 
 @bot.command(name="fix")
 async def fix_cmd(ctx, *, target: str):
     if await is_authorized(ctx):
         groq = GroqService(api_key=settings.GROQ_API_KEY)
         suggestion = groq.groq_llm(f"Suggest a fix for: {target}")
-        await send_jarvis_message(ctx.channel, f"AI Suggestion: {suggestion}")
+        await send_monsterrr_message(ctx.channel, f"AI Suggestion: {suggestion}")
 
 @bot.command(name="skip")
 async def skip_cmd(ctx, *, target: str):
     if await is_authorized(ctx):
-        await send_jarvis_message(ctx.channel, f"Will skip: {target} in next contributions.")
+        await send_monsterrr_message(ctx.channel, f"Will skip: {target} in next contributions.")
 
 @bot.command(name="ideas")
 async def ideas_cmd(ctx):
     if await is_authorized(ctx):
         agent = IdeaGeneratorAgent(GroqService(api_key=settings.GROQ_API_KEY), None)
         ideas = agent.fetch_and_rank_ideas(top_n=3)
-        await send_jarvis_message(ctx.channel, f"Top Ideas: {ideas}")
+        await send_monsterrr_message(ctx.channel, f"Top Ideas: {ideas}")
 
 # Helper to get status
 def get_monsterrr_status():

@@ -8,9 +8,13 @@ from typing import List
 class Settings(BaseSettings):
     DRY_RUN: bool = False
     MAX_AUTO_CREATIONS_PER_DAY: int = 3
+    # Discord integration
+    DISCORD_BOT_TOKEN: str
+    DISCORD_GUILD_ID: str
+    DISCORD_CHANNEL_ID: str
     def validate(self):
         missing = []
-        for field in ["GROQ_API_KEY", "GITHUB_TOKEN", "GITHUB_ORG", "SMTP_HOST", "SMTP_USER", "SMTP_PASS"]:
+        for field in ["GROQ_API_KEY", "GITHUB_TOKEN", "GITHUB_ORG", "SMTP_HOST", "SMTP_USER", "SMTP_PASS", "DISCORD_BOT_TOKEN", "DISCORD_GUILD_ID", "DISCORD_CHANNEL_ID"]:
             if not getattr(self, field, None):
                 missing.append(field)
         if missing:

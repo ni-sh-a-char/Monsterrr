@@ -197,11 +197,8 @@ async def suggest_issue_fix(repo: str, issue_number: int):
     return {"issue": issue.get('title'), "suggestion": suggestion}
 
 if __name__ == "__main__":
-    # --- Auto-start Discord Bot (Jarvis style) ---
     import multiprocessing
-    def start_discord_bot():
-        from services.discord_bot import bot, settings
-        bot.run(settings.DISCORD_BOT_TOKEN)
+    from services.discord_bot_runner import run as start_discord_bot
     discord_process = multiprocessing.Process(target=start_discord_bot)
     discord_process.start()
     import uvicorn
