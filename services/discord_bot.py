@@ -1,3 +1,15 @@
+import discord
+import datetime
+import json
+from discord.ext import commands, tasks
+from utils.config import Settings
+from services.notification_service import send_instant_email
+from agents.maintainer_agent import MaintainerAgent
+from agents.creator_agent import CreatorAgent
+from agents.idea_agent import IdeaGeneratorAgent
+from services.groq_service import GroqService
+from services.conversation_memory import ConversationMemory
+from services.task_manager import TaskManager
 from services.poll_service import PollService
 from services.doc_service import DocService
 from agents.custom_agent import CustomAgent
@@ -11,6 +23,15 @@ from services.security_service import SecurityService
 from services.code_review_service import CodeReviewService
 from services.language_service import LanguageService
 from services.voice_service import VoiceService
+
+settings = Settings()
+DISCORD_GUILD_ID = int(settings.DISCORD_GUILD_ID)
+DISCORD_CHANNEL_ID = int(settings.DISCORD_CHANNEL_ID)
+intents = discord.Intents.default()
+intents.messages = True
+intents.message_content = True
+bot = commands.Bot(command_prefix="!", intents=intents)
+
 # Feature instances
 poll_service = PollService()
 doc_service = DocService()
