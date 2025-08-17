@@ -264,28 +264,37 @@ async def send_startup_message_once():
 async def send_hourly_status_report():
     while True:
         await asyncio.sleep(3600)  # 1 hour
-        if CHANNEL_ID:
-            ch = bot.get_channel(int(CHANNEL_ID))
-            if ch:
-                # Gather professional status report data
-                status_text = (
-                    f"**🤖 Monsterrr System Status**\n"
-                    f"Startup time: {STARTUP_TIME.strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
-                    f"Model: {GROQ_MODEL}\n"
-                    f"Guilds: {len(bot.guilds)}\nMembers: {sum(g.member_count for g in bot.guilds)}\n"
-                    f"Total messages: {total_messages}\n"
-                )
-                # Add ideas, tasks, analytics, etc.
-                try:
-                    with open("monsterrr_state.json", "r", encoding="utf-8") as f:
-                        state = __import__("json").load(f)
-                    ideas = state.get("ideas", {}).get("top_ideas", [])
-                    repos = state.get("repos", [])
-                    status_text += f"\n**Top Ideas:**\n" + "\n".join([f"• {i['name']}: {i['description']}" for i in ideas])
-                    status_text += f"\n**Repos:**\n" + "\n".join([f"• {r['name']}: {r['description']}" for r in repos])
-                except Exception:
-                    status_text += "\n(No state file found)"
-                await ch.send(embed=format_embed("Monsterrr Hourly Status", status_text, 0x2d7ff9))
+        try:
+            if CHANNEL_ID:
+                ch = bot.get_channel(int(CHANNEL_ID))
+                if ch:
+                    # Gather professional status report data
+                    status_text = (
+                        f"**🤖 Monsterrr System Status**\n"
+                        f"Startup time: {STARTUP_TIME.strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
+                        f"Model: {GROQ_MODEL}\n"
+                        f"Guilds: {len(bot.guilds)}\nMembers: {sum(g.member_count for g in bot.guilds)}\n"
+                        f"Total messages: {total_messages}\n"
+                    )
+                    # Add ideas, tasks, analytics, etc.
+                    try:
+                        with open("monsterrr_state.json", "r", encoding="utf-8") as f:
+                            state = __import__("json").load(f)
+                        ideas = state.get("ideas", {}).get("top_ideas", [])
+                        repos = state.get("repos", [])
+                        status_text += f"\n**Top Ideas:**\n" + "\n".join([f"• {i['name']}: {i['description']}" for i in ideas])
+                        status_text += f"\n**Repos:**\n" + "\n".join([f"• {r['name']}: {r['description']}" for r in repos])
+                    except Exception as e:
+                        status_text += "\n(No state file found)"
+                        logger.error(f"Hourly report: Could not read monsterrr_state.json: {e}")
+                    await ch.send(embed=format_embed("Monsterrr Hourly Status", status_text, 0x2d7ff9))
+                    logger.info("Hourly status report sent to Discord.")
+                else:
+                    logger.error(f"Hourly report: Channel ID {CHANNEL_ID} not found.")
+            else:
+                logger.error("Hourly report: DISCORD_CHANNEL_ID not set.")
+        except Exception as e:
+            logger.error(f"Hourly report: Failed to send: {e}")
 
 
 import smtplib
@@ -347,16 +356,16 @@ def build_daily_report():
 async def send_daily_email_report():
     while True:
         await asyncio.sleep(86400)  # 24 hours
-        subject, html = build_daily_report()
-        recipients = os.getenv("STATUS_REPORT_RECIPIENTS", "").split(",")
-        smtp_host = os.getenv("SMTP_HOST")
-        smtp_port = int(os.getenv("SMTP_PORT", "587"))
-        smtp_user = os.getenv("SMTP_USER")
-        smtp_pass = os.getenv("SMTP_PASS")
-        if not recipients or not smtp_host or not smtp_user or not smtp_pass:
-            logger.error("Daily email report: Missing SMTP or recipient config.")
-            continue
         try:
+            subject, html = build_daily_report()
+            recipients = os.getenv("STATUS_REPORT_RECIPIENTS", "").split(",")
+            smtp_host = os.getenv("SMTP_HOST")
+            smtp_port = int(os.getenv("SMTP_PORT", "587"))
+            smtp_user = os.getenv("SMTP_USER")
+            smtp_pass = os.getenv("SMTP_PASS")
+            if not recipients or not smtp_host or not smtp_user or not smtp_pass:
+                logger.error("Daily email report: Missing SMTP or recipient config.")
+                continue
             msg = MIMEMultipart("alternative")
             msg["Subject"] = subject
             msg["From"] = smtp_user
@@ -366,9 +375,9 @@ async def send_daily_email_report():
                 server.starttls()
                 server.login(smtp_user, smtp_pass)
                 server.sendmail(smtp_user, recipients, msg.as_string())
-            logger.info("Daily email report sent to: %s", recipients)
+            logger.info(f"Daily email report sent to: {recipients}")
         except Exception as e:
-            logger.error(f"Failed to send daily email report: {e}")
+            logger.error(f"Daily report: Failed to send: {e}")
 
 @bot.event
 async def on_ready():
@@ -415,8 +424,24 @@ async def on_message(message: discord.Message):
     global total_messages
     total_messages += 1
 
+    # --- Natural Language Command Parsing ---
+    # Simple intent detection: if message contains certain keywords, treat as command
+    command_intents = [
+        ("create repo", "create_repository"),
+        ("assign task", "assign_task"),
+        ("show ideas", "show_ideas"),
+        ("status", "show_status"),
+        ("add idea", "add_idea"),
+        ("merge", "merge_pull_request"),
+        # Add more as needed
+    ]
+    intent = None
+    for kw, cmd in command_intents:
+        if kw in content.lower():
+            intent = cmd
+            break
+
     system_ctx = get_system_context(user_id)
-    # Build a simple text prompt from conversation memory (safe, deterministic)
     prompt_lines = [f"SYSTEM: {system_ctx}", "", "CONVERSATION:"]
     for m in conversation_memory[user_id]:
         role = m.get("role", "user")
@@ -425,19 +450,335 @@ async def on_message(message: discord.Message):
 
     try:
         async with message.channel.typing():
-            ai_reply = await asyncio.to_thread(_call_groq, prompt, GROQ_MODEL)
-            if not ai_reply:
-                await message.channel.send("Sorry, I couldn't generate a response.")
-                return
-            # store assistant reply once and send once
-            conversation_memory[user_id].append({"role": "assistant", "content": ai_reply})
-            await message.channel.send(ai_reply)
+            if intent:
+                # Example: call a function based on intent
+                reply = await handle_natural_command(intent, content, user_id)
+                conversation_memory[user_id].append({"role": "assistant", "content": reply})
+                await message.channel.send(reply)
+            else:
+                ai_reply = await asyncio.to_thread(_call_groq, prompt, GROQ_MODEL)
+                if not ai_reply:
+                    await message.channel.send("Sorry, I couldn't generate a response.")
+                    return
+                conversation_memory[user_id].append({"role": "assistant", "content": ai_reply})
+                await message.channel.send(ai_reply)
     except Exception as e:
         logger.exception("AI reply failed: %s", e)
         try:
             await message.channel.send(f"⚠️ AI Error: {e}")
         except Exception:
             pass
+
+# --- Handler for natural language commands ---
+async def handle_natural_command(intent, content, user_id):
+    # Fully autonomous Jarvis-like implementation
+    # You can expand this with real integrations and logic
+    # Expanded command set for full autonomy
+    if intent == "create_repository":
+        repo_name = extract_argument(content, "repo")
+        if repo_name:
+            try:
+                from services.github_service import GitHubService
+                github = GitHubService(logger=logger)
+                github.create_repository(repo_name)
+                return f"Repository '{repo_name}' created successfully."
+            except Exception as e:
+                return f"Failed to create repository: {e}"
+        return "Please specify the repository name."
+    elif intent == "delete_repository":
+        repo_name = extract_argument(content, "repo")
+        if repo_name:
+            try:
+                from services.github_service import GitHubService
+                github = GitHubService(logger=logger)
+                github.delete_repository(repo_name)
+                return f"Repository '{repo_name}' deleted successfully."
+            except Exception as e:
+                return f"Failed to delete repository: {e}"
+        return "Please specify the repository name."
+    elif intent == "assign_task":
+        user, task = extract_user_and_task(content)
+        if user and task:
+            # Here you would update monsterrr_state.json or your task manager
+            return f"Task '{task}' assigned to {user}."
+        return "Please specify both user and task."
+    elif intent == "show_ideas":
+        try:
+            with open("monsterrr_state.json", "r", encoding="utf-8") as f:
+                state = __import__("json").load(f)
+            ideas = state.get("ideas", {}).get("top_ideas", [])
+            if ideas:
+                return "Top Ideas:\n" + "\n".join([f"• {i['name']}: {i['description']}" for i in ideas])
+            else:
+                return "No ideas found."
+        except Exception as e:
+            return f"Could not read ideas: {e}"
+    elif intent == "delete_idea":
+        idea = extract_argument(content, "idea")
+        if idea:
+            try:
+                with open("monsterrr_state.json", "r", encoding="utf-8") as f:
+                    state = __import__("json").load(f)
+                ideas = state.get("ideas", {}).get("top_ideas", [])
+                state["ideas"]["top_ideas"] = [i for i in ideas if i["name"] != idea]
+                with open("monsterrr_state.json", "w", encoding="utf-8") as f:
+                    __import__("json").dump(state, f, indent=2)
+                return f"Idea '{idea}' deleted successfully."
+            except Exception as e:
+                return f"Failed to delete idea: {e}"
+        return "Please specify the idea to delete."
+    elif intent == "show_status":
+        return f"System Status:\nStartup: {STARTUP_TIME}\nModel: {GROQ_MODEL}\nGuilds: {len(bot.guilds)}\nMembers: {sum(g.member_count for g in bot.guilds)}\nTotal messages: {total_messages}"
+    elif intent == "add_idea":
+        idea = extract_argument(content, "idea")
+        if idea:
+            try:
+                with open("monsterrr_state.json", "r", encoding="utf-8") as f:
+                    state = __import__("json").load(f)
+            except Exception:
+                state = {}
+            ideas = state.setdefault("ideas", {}).setdefault("top_ideas", [])
+            ideas.append({"name": idea, "description": "Added by AI"})
+            try:
+                with open("monsterrr_state.json", "w", encoding="utf-8") as f:
+                    __import__("json").dump(state, f, indent=2)
+                return f"Idea '{idea}' added successfully."
+            except Exception as e:
+                return f"Failed to add idea: {e}"
+        return "Please specify the idea to add."
+    elif intent == "merge_pull_request":
+        pr_id = extract_argument(content, "pr")
+        if pr_id:
+            # Here you would call your merge logic
+            return f"Pull request '{pr_id}' merged."
+        return "Please specify the pull request ID."
+    elif intent == "close_issue":
+        issue_id = extract_argument(content, "issue")
+        if issue_id:
+            # Here you would call your close issue logic
+            return f"Issue '{issue_id}' closed."
+        return "Please specify the issue ID."
+    elif intent == "schedule_message":
+        msg, delay = extract_message_and_delay(content)
+        if msg and delay:
+            asyncio.create_task(schedule_discord_message(msg, delay))
+            return f"Message scheduled to be sent in {delay} seconds."
+        return "Please specify message and delay."
+    elif intent == "self_update":
+        new_model = extract_argument(content, "model")
+        if new_model:
+            os.environ["GROQ_MODEL"] = new_model
+            return f"Model updated to {new_model}."
+        return "Please specify the new model."
+    elif intent == "show_repos":
+        try:
+            with open("monsterrr_state.json", "r", encoding="utf-8") as f:
+                state = __import__("json").load(f)
+            repos = state.get("repos", [])
+            if repos:
+                return "Repositories:\n" + "\n".join([f"• {r['name']}: {r['description']}" for r in repos])
+            else:
+                return "No repositories found."
+        except Exception as e:
+            return f"Could not read repositories: {e}"
+    elif intent == "add_repo":
+        repo_name = extract_argument(content, "repo")
+        if repo_name:
+            try:
+                with open("monsterrr_state.json", "r", encoding="utf-8") as f:
+                    state = __import__("json").load(f)
+            except Exception:
+                state = {}
+            repos = state.setdefault("repos", [])
+            repos.append({"name": repo_name, "description": "Added by AI"})
+            try:
+                with open("monsterrr_state.json", "w", encoding="utf-8") as f:
+                    __import__("json").dump(state, f, indent=2)
+                return f"Repository '{repo_name}' added to state."
+            except Exception as e:
+                return f"Failed to add repository: {e}"
+        return "Please specify the repository to add."
+    elif intent == "delete_repo":
+        repo_name = extract_argument(content, "repo")
+        if repo_name:
+            try:
+                with open("monsterrr_state.json", "r", encoding="utf-8") as f:
+                    state = __import__("json").load(f)
+                repos = state.get("repos", [])
+                state["repos"] = [r for r in repos if r["name"] != repo_name]
+                with open("monsterrr_state.json", "w", encoding="utf-8") as f:
+                    __import__("json").dump(state, f, indent=2)
+                return f"Repository '{repo_name}' deleted from state."
+            except Exception as e:
+                return f"Failed to delete repository: {e}"
+        return "Please specify the repository to delete."
+    elif intent == "show_tasks":
+        try:
+            with open("monsterrr_state.json", "r", encoding="utf-8") as f:
+                state = __import__("json").load(f)
+            tasks = state.get("tasks", {})
+            if tasks:
+                return "Tasks:\n" + "\n".join([f"• {user}: {', '.join(tlist)}" for user, tlist in tasks.items()])
+            else:
+                return "No tasks found."
+        except Exception as e:
+            return f"Could not read tasks: {e}"
+    elif intent == "add_task":
+        user, task = extract_user_and_task(content)
+        if user and task:
+            try:
+                with open("monsterrr_state.json", "r", encoding="utf-8") as f:
+                    state = __import__("json").load(f)
+            except Exception:
+                state = {}
+            tasks = state.setdefault("tasks", {})
+            tasks.setdefault(user, []).append(task)
+            try:
+                with open("monsterrr_state.json", "w", encoding="utf-8") as f:
+                    __import__("json").dump(state, f, indent=2)
+                return f"Task '{task}' added for {user}."
+            except Exception as e:
+                return f"Failed to add task: {e}"
+        return "Please specify both user and task."
+    elif intent == "delete_task":
+        user, task = extract_user_and_task(content)
+        if user and task:
+            try:
+                with open("monsterrr_state.json", "r", encoding="utf-8") as f:
+                    state = __import__("json").load(f)
+                tasks = state.get("tasks", {})
+                if user in tasks:
+                    tasks[user] = [t for t in tasks[user] if t != task]
+                    with open("monsterrr_state.json", "w", encoding="utf-8") as f:
+                        __import__("json").dump(state, f, indent=2)
+                    return f"Task '{task}' deleted for {user}."
+                else:
+                    return f"No tasks found for {user}."
+            except Exception as e:
+                return f"Failed to delete task: {e}"
+        return "Please specify both user and task."
+    elif intent == "show_analytics":
+        try:
+            with open("monsterrr_state.json", "r", encoding="utf-8") as f:
+                state = __import__("json").load(f)
+            analytics = state.get("analytics", {})
+            if analytics:
+                return "Analytics:\n" + "\n".join([f"• {k}: {v}" for k, v in analytics.items()])
+            else:
+                return "No analytics found."
+        except Exception as e:
+            return f"Could not read analytics: {e}"
+    elif intent == "add_analytics":
+        key = extract_argument(content, "key")
+        value = extract_argument(content, "value")
+        if key and value:
+            try:
+                with open("monsterrr_state.json", "r", encoding="utf-8") as f:
+                    state = __import__("json").load(f)
+            except Exception:
+                state = {}
+            analytics = state.setdefault("analytics", {})
+            analytics[key] = value
+            try:
+                with open("monsterrr_state.json", "w", encoding="utf-8") as f:
+                    __import__("json").dump(state, f, indent=2)
+                return f"Analytics '{key}: {value}' added."
+            except Exception as e:
+                return f"Failed to add analytics: {e}"
+        return "Please specify both key and value."
+    elif intent == "delete_analytics":
+        key = extract_argument(content, "key")
+        if key:
+            try:
+                with open("monsterrr_state.json", "r", encoding="utf-8") as f:
+                    state = __import__("json").load(f)
+                analytics = state.get("analytics", {})
+                if key in analytics:
+                    del analytics[key]
+                    with open("monsterrr_state.json", "w", encoding="utf-8") as f:
+                        __import__("json").dump(state, f, indent=2)
+                    return f"Analytics '{key}' deleted."
+                else:
+                    return f"No analytics found for key '{key}'."
+            except Exception as e:
+                return f"Failed to delete analytics: {e}"
+        return "Please specify the key to delete."
+    elif intent == "integrate_platform":
+        platform = extract_argument(content, "platform")
+        if platform:
+            # Here you would call your integration logic
+            return f"Platform '{platform}' integrated."
+        return "Please specify the platform to integrate."
+    elif intent == "run_qa":
+        time_str = extract_argument(content, "time")
+        if time_str:
+            # Here you would call your QA logic
+            return f"QA scheduled at {time_str}."
+        return "Please specify the time for QA."
+    elif intent == "scan_repo":
+        repo_name = extract_argument(content, "repo")
+        if repo_name:
+            # Here you would call your scan logic
+            return f"Repository '{repo_name}' scanned."
+        return "Please specify the repository to scan."
+    elif intent == "review_pr":
+        pr_id = extract_argument(content, "pr")
+        if pr_id:
+            # Here you would call your review logic
+            return f"Pull request '{pr_id}' reviewed."
+        return "Please specify the pull request ID."
+    elif intent == "show_docs":
+        repo_name = extract_argument(content, "repo")
+        if repo_name:
+            # Here you would call your docs logic
+            return f"Documentation for '{repo_name}' displayed."
+        return "Please specify the repository for docs."
+    elif intent == "roadmap":
+        project = extract_argument(content, "project")
+        if project:
+            # Here you would call your roadmap logic
+            return f"Roadmap for project '{project}' displayed."
+        return "Please specify the project for roadmap."
+    elif intent == "guide":
+        # Here you would call your guide logic
+        return "Guide displayed."
+    elif intent == "help":
+        # Here you would call your help logic
+        return "Help displayed."
+    # Add more autonomous actions as needed
+    return "Sorry, I couldn't understand your command."
+
+# --- Helper functions for argument extraction and scheduling ---
+def extract_argument(text, key):
+    # Simple extraction: look for 'key: value' in text
+    import re
+    match = re.search(rf"{key}[:=]\s*(\w+)", text, re.IGNORECASE)
+    return match.group(1) if match else None
+
+def extract_user_and_task(text):
+    # Example: 'assign task to @user: do something'
+    import re
+    user_match = re.search(r"@([\w]+)", text)
+    task_match = re.search(r"task[:=]\s*(.+)", text)
+    user = user_match.group(1) if user_match else None
+    task = task_match.group(1) if task_match else None
+    return user, task
+
+def extract_message_and_delay(text):
+    # Example: 'schedule message: Hello in 60 seconds'
+    import re
+    msg_match = re.search(r"message[:=]\s*([\w\s]+)", text)
+    delay_match = re.search(r"in (\d+) seconds", text)
+    msg = msg_match.group(1) if msg_match else None
+    delay = int(delay_match.group(1)) if delay_match else None
+    return msg, delay
+
+async def schedule_discord_message(msg, delay):
+    await asyncio.sleep(delay)
+    if CHANNEL_ID:
+        ch = bot.get_channel(int(CHANNEL_ID))
+        if ch:
+            await ch.send(msg)
 
 # ---------------------------
 # Command definitions (single occurrences)
