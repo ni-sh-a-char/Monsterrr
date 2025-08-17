@@ -239,9 +239,6 @@ def _write_startup_time():
         f.write(datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"))
 
 async def send_startup_message_once():
-    # Only send if file does not exist (first run after deployment)
-    if pathlib.Path(STARTUP_MESSAGE_FILE).exists():
-        return
     await asyncio.sleep(2)
     if CHANNEL_ID:
         try:
@@ -261,10 +258,122 @@ async def send_startup_message_once():
 # ---------------------------
 # Events (single on_message flow)
 # ---------------------------
+
+async def send_hourly_status_report():
+    while True:
+        await asyncio.sleep(3600)  # 1 hour
+        if CHANNEL_ID:
+            ch = bot.get_channel(int(CHANNEL_ID))
+            if ch:
+                # Gather professional status report data
+                status_text = (
+                    f"**🤖 Monsterrr System Status**\n"
+                    f"Startup time: {STARTUP_TIME.strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
+                    f"Model: {GROQ_MODEL}\n"
+                    f"Guilds: {len(bot.guilds)}\nMembers: {sum(g.member_count for g in bot.guilds)}\n"
+                    f"Total messages: {total_messages}\n"
+                )
+                # Add ideas, tasks, analytics, etc.
+                try:
+                    with open("monsterrr_state.json", "r", encoding="utf-8") as f:
+                        state = __import__("json").load(f)
+                    ideas = state.get("ideas", {}).get("top_ideas", [])
+                    repos = state.get("repos", [])
+                    status_text += f"\n**Top Ideas:**\n" + "\n".join([f"• {i['name']}: {i['description']}" for i in ideas])
+                    status_text += f"\n**Repos:**\n" + "\n".join([f"• {r['name']}: {r['description']}" for r in repos])
+                except Exception:
+                    status_text += "\n(No state file found)"
+                await ch.send(embed=format_embed("Monsterrr Hourly Status", status_text, 0x2d7ff9))
+
+
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
+def build_daily_report():
+    try:
+        with open("monsterrr_state.json", "r", encoding="utf-8") as f:
+            state = __import__("json").load(f)
+    except Exception:
+        state = {}
+    now = datetime.utcnow()
+    startup = STARTUP_TIME.strftime('%Y-%m-%d %H:%M:%S UTC')
+    uptime = str(now - STARTUP_TIME).split(".")[0]
+    ideas = state.get("ideas", {}).get("top_ideas", [])
+    repos = state.get("repos", [])
+    analytics = state.get("analytics", {})
+    tasks = state.get("tasks", {})
+    # Compose professional HTML report
+    html = f"""
+    <div style='font-family:Segoe UI,Arial,sans-serif;max-width:600px;margin:0 auto;background:#f9f9fb;padding:32px 24px;border-radius:12px;border:1px solid #e3e7ee;'>
+        <h1 style='color:#2d7ff9;margin-bottom:0.2em;'>Monsterrr Daily Report</h1>
+        <p style='font-size:1.1em;color:#333;margin-top:0;'>
+            <b>System Status:</b><br>
+            Startup: {startup}<br>
+            Uptime: {uptime}<br>
+            Model: {GROQ_MODEL}<br>
+            Guilds: {len(bot.guilds)}<br>
+            Members: {sum(g.member_count for g in bot.guilds)}<br>
+            Total messages: {total_messages}<br>
+        </p>
+        <hr style='border:0;border-top:1px solid #e3e7ee;margin:18px 0;'>
+        <h2 style='color:#222;font-size:1.15em;margin-bottom:0.5em;'>Top Ideas</h2>
+        <ul style='line-height:1.7;font-size:1.05em;'>"""
+    for idea in ideas:
+        html += f"<li><b>{idea.get('name','')}</b>: {idea.get('description','')}</li>"
+    html += "</ul>"
+    html += "<h2 style='color:#222;font-size:1.15em;margin-bottom:0.5em;'>Active Repositories</h2><ul>"
+    for repo in repos:
+        html += f"<li><b>{repo.get('name','')}</b>: {repo.get('description','')} (<a href='{repo.get('url','')}'>{repo.get('url','')}</a>)</li>"
+    html += "</ul>"
+    if analytics:
+        html += "<h2 style='color:#222;font-size:1.15em;margin-bottom:0.5em;'>Analytics</h2><ul>"
+        for k, v in analytics.items():
+            html += f"<li><b>{k.replace('_',' ').title()}</b>: {v}</li>"
+        html += "</ul>"
+    if tasks:
+        html += "<h2 style='color:#222;font-size:1.15em;margin-bottom:0.5em;'>Tasks</h2><ul>"
+        for user, tlist in tasks.items():
+            html += f"<li><b>{user}</b>: {', '.join(tlist)}</li>"
+        html += "</ul>"
+    html += f"<hr style='border:0;border-top:1px solid #e3e7ee;margin:18px 0;'>"
+    html += f"<p style='font-size:0.95em;color:#888;'>Report generated at {now.strftime('%Y-%m-%d %H:%M UTC')}</p>"
+    html += "</div>"
+    subject = f"Monsterrr Daily Report | {now.strftime('%Y-%m-%d')}"
+    return subject, html
+
+async def send_daily_email_report():
+    while True:
+        await asyncio.sleep(86400)  # 24 hours
+        subject, html = build_daily_report()
+        recipients = os.getenv("STATUS_REPORT_RECIPIENTS", "").split(",")
+        smtp_host = os.getenv("SMTP_HOST")
+        smtp_port = int(os.getenv("SMTP_PORT", "587"))
+        smtp_user = os.getenv("SMTP_USER")
+        smtp_pass = os.getenv("SMTP_PASS")
+        if not recipients or not smtp_host or not smtp_user or not smtp_pass:
+            logger.error("Daily email report: Missing SMTP or recipient config.")
+            continue
+        try:
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = subject
+            msg["From"] = smtp_user
+            msg["To"] = ", ".join(recipients)
+            msg.attach(MIMEText(html, "html"))
+            with smtplib.SMTP(smtp_host, smtp_port) as server:
+                server.starttls()
+                server.login(smtp_user, smtp_pass)
+                server.sendmail(smtp_user, recipients, msg.as_string())
+            logger.info("Daily email report sent to: %s", recipients)
+        except Exception as e:
+            logger.error(f"Failed to send daily email report: {e}")
+
 @bot.event
 async def on_ready():
     logger.info("Logged in as %s (id=%s)", bot.user, bot.user.id)
     bot.loop.create_task(send_startup_message_once())
+    bot.loop.create_task(send_hourly_status_report())
+    bot.loop.create_task(send_daily_email_report())
 
 @bot.event
 async def on_message(message: discord.Message):
