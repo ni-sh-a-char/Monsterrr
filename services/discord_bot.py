@@ -222,23 +222,20 @@ def _call_groq(prompt: str, model: Optional[str] = None) -> str:
 # ---------------------------
 # Startup message (once)
 # ---------------------------
-import pathlib
-
-STARTUP_MESSAGE_FILE = "monsterrr_discord_startup.txt"
-
-def _last_startup_time():
-    try:
-        with open(STARTUP_MESSAGE_FILE, "r") as f:
-            ts = f.read().strip()
-            return datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
-    except Exception:
-        return None
-
-def _write_startup_time():
-    with open(STARTUP_MESSAGE_FILE, "w") as f:
-        f.write(datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"))
-
 async def send_startup_message_once():
+    # Use a dedicated file for startup message tracking
+    startup_flag_path = "discord_startup_sent.json"
+    flag = False
+    # Only send startup message if flag is not set
+    try:
+        if os.path.exists(startup_flag_path):
+            with open(startup_flag_path, "r", encoding="utf-8") as f:
+                flag = __import__("json").load(f).get("sent", False)
+    except Exception:
+        flag = False
+    if flag:
+        logger.info("Startup message already sent, skipping.")
+        return
     await asyncio.sleep(2)
     if CHANNEL_ID:
         try:
@@ -251,7 +248,12 @@ async def send_startup_message_once():
                     f"**Discord Stats:**\n• Guilds: {len(bot.guilds)}\n• Members: {sum(g.member_count for g in bot.guilds)}\n"
                 )
                 await ch.send(embed=format_embed("Monsterrr is online!", status_text, 0x00ff00))
-                _write_startup_time()
+                # Write flag only after successful send
+                try:
+                    with open(startup_flag_path, "w", encoding="utf-8") as f:
+                        __import__("json").dump({"sent": True}, f, indent=2)
+                except Exception:
+                    logger.error("Failed to update discord_startup_sent.json")
         except Exception:
             logger.exception("startup message failed")
 
@@ -383,11 +385,19 @@ async def on_message(message: discord.Message):
 
     # 2) in-process dedupe (prevents double-handling inside same process)
     try:
-        if _is_processed(message.id):
+        # Use a set for processed message IDs, keep only recent ones
+        global _processed_message_ids
+        if '_processed_message_ids' not in globals():
+            _processed_message_ids = set()
+        if message.id in _processed_message_ids:
+            logger.info(f"Duplicate message detected: {message.id}")
             return
-        _mark_processed(message.id)
-    except Exception:
-        pass
+        _processed_message_ids.add(message.id)
+        # Optionally, keep set size reasonable
+        if len(_processed_message_ids) > 10000:
+            _processed_message_ids = set(list(_processed_message_ids)[-5000:])
+    except Exception as e:
+        logger.error(f"Deduplication error: {e}")
 
     # 3) If this looks like a command: let discord.py command processor handle it (single call)
     if message.content and message.content.lstrip().startswith(bot.command_prefix):
