@@ -30,14 +30,27 @@ from scheduler import start_scheduler
 
 app = FastAPI(title="Monsterrr API", description="Autonomous GitHub org manager.")
 
-# Start the background scheduler when the app starts
+def start_discord_bot():
+    from services.discord_bot import bot
+    import os
+    token = os.getenv("DISCORD_BOT_TOKEN")
+    if token:
+        bot.run(token)
+    else:
+        print("DISCORD_BOT_TOKEN not set!")
+
+# Unified FastAPI startup event: launches scheduler, watchdog, startup email, and Discord bot
 @app.on_event("startup")
-async def launch_scheduler():
+async def launch_services():
     loop = asyncio.get_event_loop()
     loop.create_task(start_scheduler())
-    # Send startup email on server start
-    from scheduler import send_startup_email
-    send_startup_email()
+    start_watchdog()
+    # Startup email is now sent only by the scheduler, not here
+    # Start Discord bot in a background thread
+    if not hasattr(start_discord_bot, "_started"):
+        discord_thread = threading.Thread(target=start_discord_bot, daemon=True)
+        discord_thread.start()
+        start_discord_bot._started = True
 settings = Settings()
 logger = setup_logger()
 try:
@@ -93,29 +106,36 @@ async def launch_scheduler():
     loop = asyncio.get_event_loop()
     loop.create_task(start_scheduler())
     start_watchdog()
-    from scheduler import send_startup_email
-    send_startup_email()
+    # Startup email is now sent only by the scheduler, not here
 
 # Start Discord bot in a background thread when FastAPI launches
-def start_discord_bot():
-    from services.discord_bot import bot
-    import os
-    token = os.getenv("DISCORD_BOT_TOKEN")
-    if token:
-        bot.run(token)
-    else:
-        print("DISCORD_BOT_TOKEN not set!")
 
-@app.on_event("startup")
-async def launch_scheduler():
-    loop = asyncio.get_event_loop()
-    loop.create_task(start_scheduler())
-    # Send startup email on server start
-    from scheduler import send_startup_email
-    send_startup_email()
-    # Start Discord bot thread
-    discord_thread = threading.Thread(target=start_discord_bot, daemon=True)
-    discord_thread.start()
+
+
+# Manual trigger for idea agent
+@app.post("/trigger/idea-agent")
+async def trigger_idea_agent():
+    ideas = idea_agent.fetch_and_rank_ideas(top_n=3)
+    return {"ideas": ideas}
+
+@app.get("/status")
+async def status():
+    """Get current Monsterrr state file."""
+    if os.path.exists("monsterrr_state.json"):
+        with open("monsterrr_state.json", "r", encoding="utf-8") as f:
+            state = json.load(f)
+        return state
+    return {"error": "No state file found."}
+
+@app.post("/ideas/generate")
+async def generate_ideas(req: IdeaRequest):
+    """Trigger idea generation and ranking."""
+    ideas = idea_agent.fetch_and_rank_ideas(top_n=req.top_n)
+    return {"ideas": ideas}
+
+@app.post("/webhook/github")
+async def github_webhook(request: Request):
+    payload = await request.json()
 
 # Manual trigger for idea agent
 @app.post("/trigger/idea-agent")
@@ -218,9 +238,5 @@ async def suggest_issue_fix(repo: str, issue_number: int):
     return {"issue": issue.get('title'), "suggestion": suggestion}
 
 if __name__ == "__main__":
-    import threading
-    from services.discord_bot_runner import run as start_discord_bot
-    discord_thread = threading.Thread(target=start_discord_bot, daemon=True)
-    discord_thread.start()
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000)

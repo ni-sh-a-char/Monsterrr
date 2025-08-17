@@ -145,36 +145,46 @@ Monsterrr is a multi-agent, production-ready system that discovers, creates, and
 
 ---
 
-## Discord Integration (Jarvis Mode)
 
-Monsterrr now includes a professional Discord bot for real-time guidance, hourly updates, and AI-powered command execution.
+## Discord Integration: All Monsterrr Services via Commands
 
-### Features
+Monsterrr's Discord bot exposes every feature and service discussed, making your entire org manageable from Discord. All agents, automations, and analytics are available via professional, visually stunning commands and embeds.
 
-- **Hourly Discord Notifications:** Get a summary of actions, suggestions, and pending tasks every hour in your chosen channel.
-- **Daily Status Report:** Full daily report sent to Discord and email.
-- **AI Command Handling:** Guide, override, or correct the 3 daily contributions using natural language commands.
-- **Professional Responses:** All bot messages are branded and formal.
-- **Conversation Memory:** Context-aware, self-aware responses in natural language.
-- **Task Assignment & Tracking:** Assign and track tasks for contributors.
-- **Automated Issue & PR Triage:** AI-powered triage for issues and PRs.
-- **Project Roadmap Generation:** Generate and update project roadmaps.
-- **Contributor Recognition:** Automated thank-you and highlights for contributors.
-- **Executive Reports:** Daily, weekly, and monthly reports via Discord and email.
-- **Real-Time Alerts:** Notifications for critical events.
-- **Idea Voting & Polls:** Create and vote on ideas/features in Discord.
-- **Automated Documentation Updates:** AI-powered updates to docs and guides.
-- **Customizable AI Agents:** Create/configure new agents for org needs.
-- **Integrations:** Slack, Trello, Jira, Notion, and more.
-- **Scheduled Q&A Sessions:** Host Q&A/office hours in Discord.
-- **Analytics Dashboard:** Visualize org health and contributions.
-- **Auto-merge & Auto-close:** Smart rules for PRs/issues.
-- **Onboarding Automation:** Personalized onboarding for new contributors.
-- **Custom Command Builder:** Define new commands/workflows via Discord.
-- **Security & Compliance Monitoring:** Scan for secrets/vulnerabilities.
-- **AI-Powered Code Review:** LLM feedback on PRs.
-- **Multi-language Support:** Respond in multiple languages.
-- **Voice Command Integration:** Use Discord voice channels for spoken commands.
+### What You Can Do in Discord
+- **All Monsterrr features are accessible:** Ideas, status, roadmap, tasks, triage, analytics, code review, security scan, onboarding, contributor recognition, custom commands, integrations, and more.
+- **Natural language support:** Converse with Monsterrr, guide or override daily actions, and get context-aware responses.
+- **Per-user memory:** The bot remembers your history for personalized help.
+- **Professional responses:** All commands use rich Discord embeds for clarity and branding.
+- **Real-time alerts, polls, and executive reports:** Stay updated and in control.
+
+### Example Discord Commands
+- `!guide` — Show all available commands and usage instructions.
+- `!status` — Get current Monsterrr system status.
+- `!ideas` — View top AI-generated ideas.
+- `!roadmap <project>` — Generate a roadmap for a project.
+- `!assign <user> <task>` — Assign a task to a contributor.
+- `!tasks [user]` — View tasks for a user or all users.
+- `!triage <issue|pr> <item>` — AI-powered triage for issues/PRs.
+- `!recognize <user>` — Send contributor recognition.
+- `!report [daily|weekly|monthly]` — Executive reports.
+- `!alert <event>` — Send a real-time alert.
+- `!poll <question> <option1> <option2> ...` — Create a poll.
+- `!docs <repo>` — Update documentation for a repo.
+- `!custom <instruction>` — Use a customizable AI agent.
+- `!integrate <platform>` — Integrate with other platforms.
+- `!qa <time>` — Schedule a Q&A session.
+- `!analytics` — View analytics dashboard.
+- `!merge <pr>` — Auto-merge a PR.
+- `!close <issue>` — Auto-close an issue.
+- `!onboard <user>` — Onboard a new contributor.
+- `!scan <repo>` — Security scan for a repo.
+- `!review <pr>` — AI-powered code review.
+- `!language <lang> <text>` — Translate text to another language.
+- `!voice <audio>` — Process a voice command.
+
+**You can do anything with Monsterrr from Discord that you can do via the API or web.**
+
+---
 
 ### Setup
 1. **Add Discord Bot Credentials to `.env`**

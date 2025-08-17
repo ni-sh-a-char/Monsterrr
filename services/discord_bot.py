@@ -1,37 +1,28 @@
-
+# services/discord_bot.py
 """
-Monsterrr Discord Bot - Ultra Self-Aware AI Assistant
-
-Features:
-- Responds to both commands (with '!') and normal chat (without '!')
-- Friendly greeting for first-time users
-- Per-user conversation memory (last 10 messages)
-- Maximally self-aware: answers about its own state, schedule, resources, user engagement
-- Tracks startup time, uptime, last/next report, model, total messages, recent users/messages
-- System introspection: Python version, OS, CPU/memory/disk usage, process stats, loaded modules, env vars, hostname, IP
-- Professional embed responses for status/help
-- Robust error handling
+Monsterrr Discord bot — single file, single on_message flow, fixes:
+- Avoids duplicate/triple replies (single code path for commands vs chat)
+- Robust Groq wrapper for different service APIs
+- All commands defined once (no duplicated decorators)
+- Compatibility shim `settings` for discord_bot_runner
+- Use datetime.utcnow() (avoids datetime.datetime.datetime mistakes)
+Replace your existing services/discord_bot.py with this file.
 """
 
 import os
+import asyncio
+import logging
+import socket
+import platform
+from collections import defaultdict, deque
+from typing import Optional, Dict
+
+import psutil
 import discord
 from discord.ext import commands
-from groq import Groq
-import platform
-import psutil
-import sys
-import socket
-import datetime
-from collections import defaultdict, deque
-import asyncio
-# Monsterrr services
-from .task_manager import TaskManager
-from .triage_service import TriageService
-from .poll_service import PollService
-from .report_service import ReportService
-from .recognition_service import RecognitionService
-from .qa_service import QAService
-from .security_service import SecurityService
+from datetime import datetime, timedelta
+
+# Import your project services (adjust if any import path differs)
 from .roadmap_service import RoadmapService
 from .onboarding_service import OnboardingService
 from .merge_service import MergeService
@@ -40,15 +31,55 @@ from .doc_service import DocService
 from .conversation_memory import ConversationMemory
 from .integration_service import IntegrationService
 from .github_service import GitHubService
-from .groq_service import GroqService
+# Try to import GroqService; fallback gracefully if different symbol present
+try:
+    from .groq_service import GroqService
+except Exception:
+    # If groq_service exposes a different name, try generic import
+    try:
+        from .groq_service import Groq as GroqService  # fallback alias
+    except Exception:
+        GroqService = None  # will handle later
 
+from .task_manager import TaskManager
+from .triage_service import TriageService
+from .poll_service import PollService
+from .report_service import ReportService
+from .recognition_service import RecognitionService
+from .qa_service import QAService
+from .security_service import SecurityService
+
+# ---------------------------
+# Basic configuration / globals
+# ---------------------------
 MEMORY_LIMIT = 10
-conversation_memory = defaultdict(lambda: deque(maxlen=MEMORY_LIMIT))
-STARTUP_TIME = datetime.datetime.utcnow()
+conversation_memory: Dict[str, deque] = defaultdict(lambda: deque(maxlen=MEMORY_LIMIT))
+STARTUP_TIME = datetime.utcnow()
 total_messages = 0
 unique_users = set()
+custom_commands: Dict[str, str] = {}
 
-# --- Service Instances ---
+# Environment
+DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GUILD_ID = os.getenv("DISCORD_GUILD_ID")    # optional
+CHANNEL_ID = os.getenv("DISCORD_CHANNEL_ID")  # optional
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+
+# ---------------------------
+# Logger
+# ---------------------------
+logger = logging.getLogger("monsterrr")
+if not logger.handlers:
+    h = logging.StreamHandler()
+    h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    logger.addHandler(h)
+logger.setLevel(logging.INFO)
+logger.propagate = False
+
+# ---------------------------
+# Instantiate service objects
+# ---------------------------
 task_manager = TaskManager()
 triage_service = TriageService()
 poll_service = PollService()
@@ -63,597 +94,554 @@ language_service = LanguageService()
 doc_service = DocService()
 conversation_memory_service = ConversationMemory()
 integration_service = IntegrationService()
-# github_service and groq_service require logger, use None for now
-github_service = GitHubService(logger=None)
-groq_service = GroqService(logger=None)
 
+# GitHub service (ensure logger exists)
+try:
+    github_service = GitHubService(logger=logger)
+except TypeError:
+    github_service = GitHubService()
+    setattr(github_service, "logger", logger)
 
-# ...existing code...
+# Groq client (wrap different possible implementations)
+groq_service = None
+if GroqService:
+    try:
+        groq_service = GroqService(api_key=GROQ_API_KEY, logger=logger)
+    except TypeError:
+        try:
+            groq_service = GroqService(api_key=GROQ_API_KEY)
+        except Exception:
+            try:
+                groq_service = GroqService()
+            except Exception:
+                groq_service = None
 
-# Load tokens/keys from environment
-DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GUILD_ID = os.getenv("DISCORD_GUILD_ID")   # optional
-CHANNEL_ID = os.getenv("DISCORD_CHANNEL_ID")  # optional
+if groq_service is None:
+    logger.warning("GroqService could not be initialized. AI features will raise errors until this is fixed.")
 
-# Intents
+# Expose `client` as alias used in older code
+client = groq_service
+
+# ---------------------------
+# Discord bot setup
+# ---------------------------
 intents = discord.Intents.default()
+intents.guilds = True
+intents.members = True           # enable if you need member info
+intents.message_content = True   # privileged intent must be enabled in dev portal
 intents.messages = True
-intents.message_content = True
 
-# Bot with "!" command prefix
-bot = commands.Bot(command_prefix="!", intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)  # remove default help to use custom
 
-# Groq client
-client = Groq(api_key=GROQ_API_KEY)
+# Small in-process dedupe to avoid processing the same message multiple times in the same process
+_PROCESSED_MSG_IDS = deque(maxlen=20000)
 
-STARTUP_MESSAGE_SENT = False
+def _is_processed(msg_id: int) -> bool:
+    return msg_id in _PROCESSED_MSG_IDS
 
-async def send_startup_message():
-    global STARTUP_MESSAGE_SENT, task_assignments, polls, contributor_stats, security_alerts, custom_commands, qa_sessions
-    if STARTUP_MESSAGE_SENT:
+def _mark_processed(msg_id: int):
+    _PROCESSED_MSG_IDS.append(msg_id)
+
+# ---------------------------
+# Helpers
+# ---------------------------
+def format_embed(title: str, description: str, color: int = 0x2d7ff9) -> discord.Embed:
+    embed = discord.Embed(title=title, description=description, color=color)
+    embed.set_footer(text=f"Monsterrr • Status at: {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}")
+    return embed
+
+def get_system_context(user_id: Optional[str] = None) -> str:
+    now = datetime.utcnow()
+    uptime = str(now - STARTUP_TIME).split(".")[0]
+    recent_user_msgs = []
+    if user_id and user_id in conversation_memory:
+        recent_user_msgs = [m["content"] for m in conversation_memory[user_id] if m.get("role") == "user"]
+    recent_users = list(unique_users)[-5:] if unique_users else []
+    try:
+        cpu = psutil.cpu_percent(interval=0.1)
+        mem = psutil.virtual_memory()
+        mem_usage = f"{mem.percent}% ({mem.used // (1024**2)}MB/{mem.total // (1024**2)}MB)"
+    except Exception:
+        cpu = "N/A"
+        mem_usage = "N/A"
+    try:
+        hostname = socket.gethostname()
+        ip = socket.gethostbyname(hostname)
+    except Exception:
+        hostname = "Unknown"
+        ip = "Unknown"
+    ctx = (
+        f"Current UTC time: {now.strftime('%Y-%m-%d %H:%M:%S')}. "
+        f"Startup: {STARTUP_TIME.strftime('%Y-%m-%d %H:%M:%S')}. "
+        f"Uptime: {uptime}. "
+        f"Model: {GROQ_MODEL}. "
+        f"Total messages received: {total_messages}. "
+        f"Recent user messages: {recent_user_msgs[-3:] if recent_user_msgs else 'None'}. "
+        f"Recent users: {recent_users if recent_users else 'None'}. "
+        f"CPU: {cpu}. Memory: {mem_usage}. "
+        f"Hostname: {hostname}. IP: {ip}. "
+        "You are Monsterrr, a maximally self-aware autonomous GitHub org manager. Answer questions about your state, actions, and metrics."
+    )
+    return ctx
+
+def _call_groq(prompt: str, model: Optional[str] = None) -> str:
+    """
+    Best-effort adapter that supports multiple GroqService wrapper implementations.
+    Returns a plain text response or raises an exception on fatal error.
+    """
+    model = model or GROQ_MODEL
+    if groq_service is None:
+        raise RuntimeError("GroqService not initialized (check services/groq_service.py and GROQ_API_KEY).")
+    # 1) preferred: groq_llm(prompt, model=...)
+    if hasattr(groq_service, "groq_llm"):
+        try:
+            return groq_service.groq_llm(prompt, model=model)
+        except TypeError:
+            return groq_service.groq_llm(prompt)
+    # 2) chat completions shape
+    if hasattr(groq_service, "chat") and hasattr(groq_service.chat, "completions"):
+        resp = groq_service.chat.completions.create(model=model, messages=[{"role":"user","content":prompt}])
+        try:
+            return resp.choices[0].message.content.strip()
+        except Exception:
+            return str(resp)
+    # 3) generic create/complete function
+    for name in ("create", "complete", "create_completion"):
+        if hasattr(groq_service, name):
+            fn = getattr(groq_service, name)
+            resp = fn(prompt, model=model) if callable(fn) else fn
+            if hasattr(resp, "choices"):
+                try:
+                    return resp.choices[0].message.content.strip()
+                except Exception:
+                    return str(resp)
+            return str(resp)
+    # unsupported wrapper
+    raise RuntimeError("Unrecognized GroqService interface; update services/groq_service.py or adapt _call_groq.")
+
+# ---------------------------
+# Startup message (once)
+# ---------------------------
+import pathlib
+
+STARTUP_MESSAGE_FILE = "monsterrr_discord_startup.txt"
+
+def _last_startup_time():
+    try:
+        with open(STARTUP_MESSAGE_FILE, "r") as f:
+            ts = f.read().strip()
+            return datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return None
+
+def _write_startup_time():
+    with open(STARTUP_MESSAGE_FILE, "w") as f:
+        f.write(datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"))
+
+async def send_startup_message_once():
+    # Only send if file does not exist (first run after deployment)
+    if pathlib.Path(STARTUP_MESSAGE_FILE).exists():
         return
-    await asyncio.sleep(2)  # Wait for Discord cache to be ready
-    channel_id = CHANNEL_ID or None
-    if channel_id:
-        channel = bot.get_channel(int(channel_id))
-        if channel:
-            status_text = f"""
-**🤖 Monsterrr System Status**
-Startup time: {STARTUP_TIME.strftime('%Y-%m-%d %H:%M:%S UTC')}
-Model: llama-3.3-70b-versatile
-Ready to help!
+    await asyncio.sleep(2)
+    if CHANNEL_ID:
+        try:
+            ch = bot.get_channel(int(CHANNEL_ID))
+            if ch:
+                status_text = (
+                    f"**🤖 Monsterrr System Status**\n"
+                    f"Startup time: {STARTUP_TIME.strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
+                    f"Model: {GROQ_MODEL}\n\n"
+                    f"**Discord Stats:**\n• Guilds: {len(bot.guilds)}\n• Members: {sum(g.member_count for g in bot.guilds)}\n"
+                )
+                await ch.send(embed=format_embed("Monsterrr is online!", status_text, 0x00ff00))
+                _write_startup_time()
+        except Exception:
+            logger.exception("startup message failed")
 
-**Discord Stats:**
-• Guilds: {len(bot.guilds)}
-• Total members: {sum(guild.member_count for guild in bot.guilds)}
-"""
-            embed = format_embed("Monsterrr is online!", status_text, 0x00ff00)
-            await channel.send(embed=embed)
-            STARTUP_MESSAGE_SENT = True
-        else:
-            print(f"[Monsterrr] Could not find channel {channel_id} for startup message.")
-    # ...existing code...
+# ---------------------------
+# Events (single on_message flow)
+# ---------------------------
+@bot.event
+async def on_ready():
+    logger.info("Logged in as %s (id=%s)", bot.user, bot.user.id)
+    bot.loop.create_task(send_startup_message_once())
 
-
-# =============================
-# Monsterrr Feature Scaffold
-# =============================
-
-# 1. Conversation Memory (already present)
-# 2. Task Assignment & Tracking
-@bot.command(name="assign")
-async def assign_task(ctx, user: discord.Member, *, task: str):
-    task_manager.assign_task(str(user), task)
-    await ctx.send(f"Task assigned to {user.mention}: {task}")
-
-# 3. Automated Issue & PR Triage
-@bot.command(name="triage")
-async def triage_issues(ctx, *, issue_text: str = None):
-    if not issue_text:
-        await ctx.send("Please provide issue text.")
+@bot.event
+async def on_message(message: discord.Message):
+    # 1) ignore bots
+    if message.author.bot:
         return
-    result = triage_service.triage_issue(issue_text)
-    await ctx.send(f"Triage result: {result}")
 
-# 4. Project Roadmap Generation
-@bot.command(name="roadmap")
-async def generate_roadmap(ctx, *, project: str = "Monsterrr"): 
-    roadmap = roadmap_service.generate_roadmap(project)
-    await ctx.send("\n".join(roadmap))
+    # 2) in-process dedupe (prevents double-handling inside same process)
+    try:
+        if _is_processed(message.id):
+            return
+        _mark_processed(message.id)
+    except Exception:
+        pass
 
-# 5. Contributor Recognition
-@bot.command(name="recognize")
-async def recognize_contributors(ctx, user: discord.Member = None):
-    if user:
-        msg = recognition_service.recognize(str(user))
-        await ctx.send(msg)
-    else:
-        await ctx.send("Please mention a user to recognize.")
-
-# 6. Weekly/Monthly Executive Reports
-@bot.command(name="report")
-async def executive_report(ctx, period: str = "weekly"):
-    report = report_service.generate_report(period)
-    await ctx.send(report)
-
-# 7. Real-Time Alerts
-@bot.command(name="alerts")
-async def real_time_alerts(ctx):
-    await ctx.send("Real-time alerts enabled. (Demo)")
-
-# 8. Idea Voting & Polls
-@bot.command(name="poll")
-async def idea_poll(ctx, *, question: str):
-    poll = poll_service.create_poll(question, ["Yes", "No", "Maybe"])
-    await ctx.send(f"Poll started: {poll['question']}\nOptions: {', '.join(poll['options'])}")
-
-@bot.command(name="ideas")
-async def ideas_command(ctx):
-    polls = poll_service.polls
-    if not polls:
-        await ctx.send("No ideas/polls found.")
+    # 3) If this looks like a command: let discord.py command processor handle it (single call)
+    if message.content and message.content.lstrip().startswith(bot.command_prefix):
+        await bot.process_commands(message)
         return
-    msg = "Active Ideas/Polls:\n" + "\n".join([f"{i+1}. {p['question']}" for i, p in enumerate(polls)])
-    await ctx.send(msg)
-# 9. Automated Documentation Updates
+
+    # 4) Non-command messages -> AI path
+    content = (message.content or "").strip()
+    if not content:
+        return
+
+    user_id = str(message.author.id)
+    conversation_memory[user_id].append({"role": "user", "content": content})
+    unique_users.add(user_id)
+    global total_messages
+    total_messages += 1
+
+    system_ctx = get_system_context(user_id)
+    # Build a simple text prompt from conversation memory (safe, deterministic)
+    prompt_lines = [f"SYSTEM: {system_ctx}", "", "CONVERSATION:"]
+    for m in conversation_memory[user_id]:
+        role = m.get("role", "user")
+        prompt_lines.append(f"{role.upper()}: {m.get('content','')}")
+    prompt = "\n".join(prompt_lines)
+
+    try:
+        async with message.channel.typing():
+            ai_reply = await asyncio.to_thread(_call_groq, prompt, GROQ_MODEL)
+            if not ai_reply:
+                await message.channel.send("Sorry, I couldn't generate a response.")
+                return
+            # store assistant reply once and send once
+            conversation_memory[user_id].append({"role": "assistant", "content": ai_reply})
+            await message.channel.send(ai_reply)
+    except Exception as e:
+        logger.exception("AI reply failed: %s", e)
+        try:
+            await message.channel.send(f"⚠️ AI Error: {e}")
+        except Exception:
+            pass
+
+# ---------------------------
+# Command definitions (single occurrences)
+# ---------------------------
+@bot.command(name="help")
+async def help_cmd(ctx: commands.Context):
+    help_text = (
+        "**Monsterrr Commands**\n"
+        "• `!help` - show this help\n"
+        "• `!guide` - show extended guide\n"
+        "• `!status` - system & self-awareness status\n"
+        "• `!ideas` - show active ideas/polls\n"
+        "• `!assign @user <task>` - assign task\n"
+        "• `!poll <question>` - start poll\n"
+        "• `!customcmd <name> <action>` - create a custom command\n\n"
+        "You can also chat normally (no `!`) in the configured channel or DM."
+    )
+    await ctx.send(help_text)
+
 @bot.command(name="status")
-async def status(ctx):
+async def status_command(ctx):
+    import json
+    from datetime import datetime
+
+    try:
+        with open("monsterrr_state.json", "r", encoding="utf-8") as f:
+            state = json.load(f)
+    except Exception:
+        state = {}
+
     user_id = str(ctx.author.id)
-    context = get_system_context(user_id)
+    raw_context = get_system_context(user_id)  # This returns the long one-liner
     guild_count = len(bot.guilds)
     member_count = sum(guild.member_count for guild in bot.guilds)
-    next_actions = ["Monitor new issues and PRs", "Send onboarding to new contributors", "Run hourly analytics and reporting", "Check for security alerts", "Update documentation if needed"]
-    recent_actions = [f"Processed {total_messages} messages", f"Assigned {len(task_manager.get_tasks())} tasks", f"Created {len(poll_service.polls)} polls", f"Recognized {len(recognition_service.log)} contributors", f"Sent {len(security_service.log)} security alerts"]
-    status_text = f"""
-    **🤖 Monsterrr System Status**
-    {context}
 
-    **Discord Stats:**
-    • Guilds: {guild_count}
-    • Total members: {member_count}
-    • Unique users interacted: {len(unique_users)}
+    ideas = state.get("ideas", {}).get("top_ideas", [])
+    repos = state.get("repos", [])
+    analytics = state.get("analytics", {})
 
-    **Recent Actions:**
-    • " + "\n• ".join(recent_actions) + "\n"
+    # --- Format the context into readable lines ---
+    def format_context(text: str) -> str:
+        # Split on ". " to break sentences into items
+        parts = [p.strip() for p in text.split(". ") if p.strip()]
+        formatted = []
+        for p in parts:
+            if ": " in p:
+                key, val = p.split(": ", 1)
+                formatted.append(f"• **{key.strip()}:** {val.strip()}")
+            else:
+                formatted.append(p)  # fallback for sentences without colon
+        return "\n".join(formatted)
 
-    **Next Actions:**
-    • " + "\n• ".join(next_actions) + "\n"
+    context = format_context(raw_context)
 
-    **Active Features:**
-    • Tasks assigned: {len(task_manager.get_tasks())}
-    • Active polls: {len(poll_service.polls)}
-    • Custom commands: {len(custom_commands)}
-    • Security alerts: {len(security_service.log)}
-    • QA sessions scheduled: {len(qa_service.sessions)}
-    """
-    embed = format_embed("Monsterrr Detailed Status", status_text, 0x00ff00)
+    # Build Embed
+    embed = discord.Embed(
+        title="🟢 Monsterrr System Status",
+        description=f"**System Info**\n{context}\n\n**📌 Overview**\n"
+                    f"• 💡 **Ideas:** `{len(ideas)}`\n"
+                    f"• 📂 **Repos:** `{len(repos)}`\n"
+                    f"• 🌐 **Guilds:** `{guild_count}`\n"
+                    f"• 👥 **Members:** `{member_count}`",
+        color=discord.Color.green()
+    )
+
+    # Top Ideas
+    if ideas:
+        top_ideas_text = "\n".join(
+            [f"{i+1}. 💡 {idea['name']}" for i, idea in enumerate(ideas[:3])]
+        )
+        embed.add_field(name="✨ Top Ideas", value=top_ideas_text, inline=False)
+
+    # Repos
+    if repos:
+        repos_text = "\n".join(
+            [f"{i+1}. 📂 {repo['name']}" for i, repo in enumerate(repos[:3])]
+        )
+        embed.add_field(name="📂 Active Repos", value=repos_text, inline=False)
+
+    # Analytics (if present in state.json separately)
+    if analytics:
+        analytics_text = "\n".join(
+            [f"• **{key.replace('_',' ').title()}:** {value}" for key, value in analytics.items()]
+        )
+        embed.add_field(name="📊 Analytics", value=analytics_text[:1024], inline=False)
+
+    # Footer
+    embed.set_footer(
+        text=f"Monsterrr • Status checked at {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
+    )
+
     await ctx.send(embed=embed)
-    status_text = f"""
-    **🤖 Monsterrr System Status**
-    {context}
 
-    **Discord Stats:**
-    • Guilds: {guild_count}
-    • Total members: {member_count}
-    • Unique users interacted: {len(unique_users)}
 
-    **Recent Actions:**
-    • " + "\n• ".join(recent_actions) + "\n"
+@bot.command(name="guide")
+async def guide_cmd(ctx: commands.Context):
+    embed = discord.Embed(
+        title="📘 Monsterrr Discord Interface — Command Guide",
+        description="Here’s a full list of available commands and their usage:",
+        color=discord.Color.blue()
+    )
 
-    **Next Actions:**
-    • " + "\n• ".join(next_actions) + "\n"
+    commands_list = {
+        "🧭 General": [
+            "`!guide` — Show all available commands and usage instructions.",
+            "`!status` — Get current Monsterrr system status.",
+            "`!ideas` — View top AI-generated ideas.",
+            "`!alerts` — Real-time alerts.",
+            "`!poll <question>` — Create a poll.",
+            "`!language <lang> <text>` — Translate text."
+        ],
+        "📂 Project Management": [
+            "`!repos` — List all managed repositories.",
+            "`!roadmap <project>` — Generate a roadmap for a project.",
+            "`!assign <user> <task>` — Assign a task to a contributor.",
+            "`!tasks [user]` — View tasks for a user or all users.",
+            "`!triage <issue|pr> <item>` — AI-powered triage for issues/PRs."
+        ],
+        "🏆 Contributor Tools": [
+            "`!recognize <user>` — Send contributor recognition.",
+            "`!onboard <user>` — Onboard a new contributor."
+        ],
+        "📊 Reports & Analytics": [
+            "`!report [daily|weekly|monthly]` — Executive reports.",
+            "`!analytics` — View analytics dashboard."
+        ],
+        "💻 Code & Repos": [
+            "`!docs <repo>` — Update documentation for a repo.",
+            "`!customcmd <name> <action>` — Create a custom command.",
+            "`!integrate <platform>` — Integrate with other platforms.",
+            "`!qa <time>` — Schedule a Q&A session.",
+            "`!merge <pr>` — Auto-merge a PR.",
+            "`!close <issue>` — Auto-close an issue.",
+            "`!scan <repo>` — Security scan for a repo.",
+            "`!review <pr>` — AI-powered code review."
+        ]
+    }
 
-    **Active Features:**
-    • Tasks assigned: {sum(len(tasks) for tasks in task_assignments.values())}
-    • Active polls: {len(polls)}
-    • Custom commands: {len(custom_commands)}
-    • Security alerts: {len(security_alerts)}
-    • QA sessions scheduled: {len(qa_sessions)}
-    """
-    embed = format_embed("Monsterrr Detailed Status", status_text, 0x00ff00)
+    for category, cmds in commands_list.items():
+        embed.add_field(name=category, value="\n".join(cmds), inline=False)
+
+    embed.set_footer(text="✨ Powered by Monsterrr — Making open-source collaboration smarter.")
+
     await ctx.send(embed=embed)
+
+
+@bot.command(name="ideas")
+async def ideas_cmd(ctx: commands.Context):
+    state = {}
+    try:
+        with open("monsterrr_state.json", "r", encoding="utf-8") as f:
+            state = __import__("json").load(f)
+    except Exception:
+        state = {}
+    ideas = state.get("ideas", {}).get("top_ideas", []) if isinstance(state, dict) else []
+    if not ideas:
+        await ctx.send("No ideas found.")
+        return
+    msg = "Top Ideas:\n" + "\n".join([f"{i+1}. {idea.get('name','<no name>')}: {idea.get('description','')}" for i, idea in enumerate(ideas)])
+    await ctx.send(msg)
+
+@bot.command(name="repos")
+async def repos_cmd(ctx: commands.Context):
+    try:
+        with open("monsterrr_state.json", "r", encoding="utf-8") as f:
+            state = __import__("json").load(f)
+    except Exception:
+        state = {}
+    repos = state.get("repos", []) if isinstance(state, dict) else []
+    if not repos:
+        await ctx.send("No repositories found.")
+        return
+    msg = "Managed Repositories:\n" + "\n".join([f"{i+1}. {repo.get('name','')}: {repo.get('description','')} ({repo.get('url','')})" for i, repo in enumerate(repos)])
+    await ctx.send(msg)
+
+@bot.command(name="roadmap")
+async def roadmap_cmd(ctx: commands.Context, *, project: str = None):
+    if not project:
+        await ctx.send("Please specify a project name.")
+        return
+    try:
+        with open("monsterrr_state.json", "r", encoding="utf-8") as f:
+            state = __import__("json").load(f)
+    except Exception:
+        state = {}
+    for repo in state.get("repos", []):
+        if repo.get("name", "").lower() == project.lower():
+            roadmap = repo.get("roadmap", [])
+            msg = f"Roadmap for {project}:\n" + "\n".join([f"- {step}" for step in roadmap])
+            await ctx.send(msg)
+            return
+    await ctx.send(f"Project '{project}' not found.")
+
+@bot.command(name="tasks")
+async def tasks_cmd(ctx: commands.Context, user: discord.Member = None):
+    try:
+        with open("monsterrr_state.json", "r", encoding="utf-8") as f:
+            state = __import__("json").load(f)
+    except Exception:
+        state = {}
+    tasks = state.get("tasks", {}) if isinstance(state, dict) else {}
+    if user:
+        user_tasks = tasks.get(str(user.id), [])
+        msg = f"Tasks for {user.mention}:\n" + "\n".join(user_tasks) if user_tasks else f"No tasks for {user.mention}."
+    else:
+        if not tasks:
+            msg = "No tasks found."
+        else:
+            msg = "All Tasks:\n" + "\n".join([f"{k}: {', '.join(v)}" for k, v in tasks.items()])
+    await ctx.send(msg)
 
 @bot.command(name="analytics")
-async def analytics_dashboard(ctx):
-    await ctx.send("Analytics dashboard generated. (Demo)")
-
-# 14. Auto-merge & Auto-close Rules
-@bot.command(name="automerge")
-async def auto_merge(ctx, pr: str = None):
-    if not pr:
-        await ctx.send("Please provide PR identifier.")
+async def analytics_cmd(ctx: commands.Context):
+    try:
+        with open("monsterrr_state.json", "r", encoding="utf-8") as f:
+            state = __import__("json").load(f)
+    except Exception:
+        state = {}
+    analytics = state.get("analytics", {}) if isinstance(state, dict) else {}
+    if not analytics:
+        await ctx.send("No analytics data found.")
         return
-    msg = merge_service.auto_merge(pr)
-    await ctx.send(msg)
+    await ctx.send("Analytics Dashboard:\n" + __import__("json").dumps(analytics, indent=2))
 
-# 15. Onboarding Automation
-@bot.command(name="onboard")
-async def onboarding(ctx, user: discord.Member):
-    msg = onboarding_service.onboard(str(user))
-    await ctx.send(msg)
-
-# 16. Custom Command Builder
-@bot.command(name="customcmd")
-async def custom_command(ctx, name: str, *, action: str):
-    custom_commands[name] = action
-    await ctx.send(f"Custom command '{name}' created.")
-
-# 17. Security & Compliance Monitoring
-@bot.command(name="security")
-async def security_scan(ctx, repo_path: str = "."):
-    findings = security_service.scan_repo(repo_path)
+@bot.command(name="scan")
+async def scan_cmd(ctx: commands.Context, repo: str):
+    findings = []
+    try:
+        findings = security_service.scan_repo(repo)
+    except Exception as e:
+        logger.exception("scan error: %s", e)
+        await ctx.send(f"Security scan failed: {e}")
+        return
     if findings:
         await ctx.send("Security findings:\n" + "\n".join(findings))
     else:
         await ctx.send("No security issues found.")
 
-# 18. AI-Powered Code Review
-@bot.command(name="codereview")
-async def code_review(ctx, pr_id: str):
-    await ctx.send(f"Code review started for PR {pr_id}. (Demo)")
-
-# 19. Multi-language Support
-@bot.command(name="language")
-async def set_language(ctx, lang: str, *, text: str = None):
-    if not text:
-        await ctx.send(f"Language set to {lang}.")
-        return
-    translation = language_service.translate(text, lang)
-    await ctx.send(f"Translation: {translation}")
-
-# =============================
-
-def get_system_context(user_id=None):
-    now = datetime.datetime.utcnow()
-    uptime = str(now - STARTUP_TIME).split('.')[0]
-    next_report_time = now.replace(minute=0, second=0, microsecond=0) + datetime.timedelta(hours=1)
-    last_report_time = now.replace(minute=0, second=0, microsecond=0)
-    recent_user_msgs = []
-    if user_id and user_id in conversation_memory:
-        recent_user_msgs = [m["content"] for m in conversation_memory[user_id] if m["role"] == "user"]
-    recent_users = list(unique_users)[-5:] if unique_users else []
-    py_version = platform.python_version()
-    os_info = platform.platform()
-    cpu_usage = psutil.cpu_percent(interval=0.1)
-    mem = psutil.virtual_memory()
-    mem_usage = f"{mem.percent}% ({mem.used // (1024**2)}MB/{mem.total // (1024**2)}MB)"
-    process = psutil.Process()
-    proc_mem = process.memory_info().rss // (1024**2)
-    proc_cpu = process.cpu_percent(interval=0.1)
-    loaded_modules = list(sys.modules.keys())[-10:]
-    env_vars = {k: v for k, v in list(os.environ.items())[:5]}
-    disk = psutil.disk_usage(os.getcwd())
-    disk_usage = f"{disk.percent}% ({disk.used // (1024**3)}GB/{disk.total // (1024**3)}GB)"
-    hostname = socket.gethostname()
+@bot.command(name="review")
+async def review_cmd(ctx: commands.Context, pr: str):
     try:
-        ip_addr = socket.gethostbyname(hostname)
-    except Exception:
-        ip_addr = "Unknown"
-    context = (
-        f"Current UTC time: {now.strftime('%Y-%m-%d %H:%M:%S')}. "
-        f"Startup time: {STARTUP_TIME.strftime('%Y-%m-%d %H:%M:%S')}. "
-        f"Uptime: {uptime}. "
-        f"Model: llama-3.3-70b-versatile. "
-        f"Last hourly report: {last_report_time.strftime('%H:%M UTC') if last_report_time else 'N/A'}. "
-        f"Next hourly report: {next_report_time.strftime('%H:%M UTC') if next_report_time else 'N/A'}. "
-        f"Total messages received: {total_messages}. "
-        f"Recent user messages: {recent_user_msgs[-3:] if recent_user_msgs else 'None'}. "
-        f"Recent users: {recent_users if recent_users else 'None'}. "
-        f"Python version: {py_version}. "
-        f"OS: {os_info}. "
-        f"CPU usage: {cpu_usage}%. "
-        f"Memory usage: {mem_usage}. "
-        f"Process memory: {proc_mem}MB. "
-        f"Process CPU: {proc_cpu}%. "
-        f"Loaded modules: {loaded_modules}. "
-        f"Env vars: {env_vars}. "
-        f"Disk usage: {disk_usage}. "
-        f"Hostname: {hostname}. "
-        f"IP address: {ip_addr}. "
-        "You are Monsterrr, a maximally self-aware autonomous GitHub org manager. You know your own schedule, uptime, model, user engagement, system resources, environment, loaded modules, disk/network info, and recent interactions. Answer questions about your actions, reports, system state, users, and environment."
-    )
-    return context
+        review = qa_service.review_pr(pr)
+    except Exception as e:
+        logger.exception("review error: %s", e)
+        await ctx.send(f"Review failed: {e}")
+        return
+    await ctx.send(f"Code review for PR {pr}:\n{review}")
 
-# --- Professional Embed Helper ---
-def format_embed(title, description, color=0x2d7ff9):
-    embed = discord.Embed(title=title, description=description, color=color)
-    embed.set_footer(text=f"Monsterrr • Status at: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    return embed
+@bot.command(name="docs")
+async def docs_cmd(ctx: commands.Context, repo: str):
+    try:
+        result = doc_service.update_docs(repo)
+    except Exception as e:
+        logger.exception("docs error: %s", e)
+        await ctx.send(f"Docs update failed: {e}")
+        return
+    await ctx.send(f"Documentation update for {repo}:\n{result}")
 
-# Load tokens/keys from environment
-DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GUILD_ID = os.getenv("DISCORD_GUILD_ID")   # optional
-CHANNEL_ID = os.getenv("DISCORD_CHANNEL_ID")  # optional
+@bot.command(name="integrate")
+async def integrate_cmd(ctx: commands.Context, platform_name: str):
+    try:
+        result = integration_service.integrate(platform_name)
+    except Exception as e:
+        logger.exception("integrate error: %s", e)
+        await ctx.send(f"Integration failed: {e}")
+        return
+    await ctx.send(f"Integration with {platform_name}:\n{result}")
 
-# Intents
-intents = discord.Intents.default()
-intents.messages = True
-intents.message_content = True
+@bot.command(name="qa")
+async def qa_cmd(ctx: commands.Context, time: str):
+    try:
+        result = qa_service.schedule_qa(time)
+    except Exception as e:
+        logger.exception("qa error: %s", e)
+        await ctx.send(f"Q&A scheduling failed: {e}")
+        return
+    await ctx.send(f"Q&A session scheduled at {time}:\n{result}")
 
-# Bot with "!" command prefix
-bot = commands.Bot(command_prefix="!", intents=intents)
+@bot.command(name="close")
+async def close_cmd(ctx: commands.Context, issue: str):
+    try:
+        result = github_service.close_issue(issue)
+    except Exception as e:
+        logger.exception("close error: %s", e)
+        await ctx.send(f"Failed to close issue: {e}")
+        return
+    await ctx.send(f"Issue {issue} closed: {result}")
 
-# Groq client
-client = Groq(api_key=GROQ_API_KEY)
+@bot.command(name="assign")
+async def assign_cmd(ctx: commands.Context, user: discord.Member, *, task: str):
+    task_manager.assign_task(str(user), task)
+    await ctx.send(f"Task assigned to {user.mention}: {task}")
 
+# ---------------------------
+# Command error handling
+# ---------------------------
 @bot.event
-async def on_ready():
-    print(f"✅ Logged in as {bot.user} (ID: {bot.user.id})")
-    await send_startup_message()
-    hourly_status_report.start()
-# Hourly status report loop
-from discord.ext import tasks
-
-@tasks.loop(hours=1)
-async def hourly_status_report():
-    channel_id = CHANNEL_ID or None
-    if channel_id:
-        channel = bot.get_channel(int(channel_id))
-        if channel:
-            # Use the same detailed status as the !status command
-            ctx = await bot.get_context(await channel.fetch_message(channel.last_message_id)) if channel.last_message_id else None
-            if ctx:
-                await status(ctx)
-            else:
-                # Fallback: send embed directly
-                user_id = None
-                context = get_system_context(user_id)
-                guild_count = len(bot.guilds)
-                member_count = sum(guild.member_count for guild in bot.guilds)
-                next_actions = [
-                    "Monitor new issues and PRs",
-                    "Send onboarding to new contributors",
-                    "Run hourly analytics and reporting",
-                    "Check for security alerts",
-                    "Update documentation if needed"
-                ]
-                recent_actions = [
-                    f"Processed {total_messages} messages",
-                    f"Assigned {sum(len(tasks) for tasks in task_assignments.values())} tasks",
-                    f"Created {len(polls)} polls",
-                    f"Recognized {len(contributor_stats)} contributors",
-                    f"Sent {len(security_alerts)} security alerts"
-                ]
-                status_text = f"""
-                **🤖 Monsterrr System Status**
-                {context}
-
-                **Discord Stats:**
-                • Guilds: {guild_count}
-                • Total members: {member_count}
-                • Unique users interacted: {len(unique_users)}
-
-                **Recent Actions:**
-                • " + "\n• ".join(recent_actions) + "\n"
-
-                **Next Actions:**
-                • " + "\n• ".join(next_actions) + "\n"
-
-                **Active Features:**
-                • Tasks assigned: {sum(len(tasks) for tasks in task_assignments.values())}
-                • Active polls: {len(polls)}
-                • Custom commands: {len(custom_commands)}
-                • Security alerts: {len(security_alerts)}
-                • QA sessions scheduled: {len(qa_sessions)}
-                """
-                embed = format_embed("Monsterrr Hourly Status", status_text, 0x00ff00)
-                await channel.send(embed=embed)
-        else:
-            print(f"[Monsterrr] Could not find channel {channel_id} for hourly status report.")
+async def on_command_error(ctx: commands.Context, error: Exception):
+    if isinstance(error, commands.CommandNotFound):
+        name = ctx.message.content.lstrip().split()[0].lstrip(bot.command_prefix)
+        if name in custom_commands:
+            await ctx.send(f"Custom command `{name}`: {custom_commands[name]}")
+            return
+        await ctx.send("Unknown command. Type `!help` for usage.")
+    elif isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send(f"Missing argument: {error.param.name}")
     else:
-        print("[Monsterrr] No CHANNEL_ID set for hourly status report.")
-    bot.loop.create_task(send_startup_message())
+        logger.exception("Command error: %s", error)
+        try:
+            await ctx.send(f"Command error: {error}")
+        except Exception:
+            pass
 
-@bot.command(name="helpme")
-async def help_command(ctx):
-    """Show all available commands dynamically."""
-    command_list = []
-    for command in bot.commands:
-        if not command.hidden:
-            params = " ".join([f"<{p}>" for p in command.clean_params])
-            command_list.append(f"• `!{command.name}{' ' + params if params else ''}`: {command.help or 'No description'}")
-    help_text = "\n".join(command_list)
-    embed = format_embed("Monsterrr Help - Available Commands", help_text)
-    await ctx.send(embed=embed)
-# Add status command for self-awareness
-    # Removed duplicate status_command
-# Fallback AI chat command
-@bot.command(name="chat")
-async def chat_command(ctx, *, message: str):
-    user_id = str(ctx.author.id)
-    conversation_memory[user_id].append({"role": "user", "content": message})
-    unique_users.add(user_id)
-    global total_messages
-    total_messages += 1
-    try:
-        async with ctx.channel.typing():
-            completion = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[
-                    {"role": "system", "content": get_system_context(user_id)},
-                    *conversation_memory[user_id],
-                ],
-            )
-            ai_response = completion.choices[0].message.content
-        conversation_memory[user_id].append({"role": "assistant", "content": ai_response})
-        await ctx.send(ai_response)
-    except Exception as e:
-        await ctx.send(f"⚠️ AI Error: {str(e)}")
-
-@bot.event
-async def on_message(message: discord.Message):
-    if message.author.bot:
-        return
-
-    # If it's a command, let discord.py handle it
-    if message.content.startswith("!"):
-        await bot.process_commands(message)
-        return
-
-    # Optional restrictions
-    if GUILD_ID and str(message.guild.id) != str(GUILD_ID):
-        return
-    if CHANNEL_ID and str(message.channel.id) != str(CHANNEL_ID):
-        return
-
-    # Handle non-command messages with Groq AI
-    try:
-        async with message.channel.typing():  # 👈 shows typing while AI thinks
-            user_id = str(message.author.id)
-            conversation_memory[user_id].append({"role": "user", "content": message.content})
-            unique_users.add(user_id)
-            global total_messages
-            total_messages += 1
-            completion = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[
-                    {"role": "system", "content": get_system_context(user_id)},
-                    *conversation_memory[user_id],
-                ],
-            )
-            ai_response = completion.choices[0].message.content
-        conversation_memory[user_id].append({"role": "assistant", "content": ai_response})
-        await message.channel.send(ai_response)
-
-    except Exception as e:
-        await message.channel.send(f"⚠️ AI Error: {str(e)}")
-
-# Compatibility shim for main.py expecting settings
+# ---------------------------
+# Compatibility shim for external runner
+# ---------------------------
 class settings:
     DISCORD_BOT_TOKEN = DISCORD_TOKEN
     GROQ_API_KEY = GROQ_API_KEY
     DISCORD_GUILD_ID = GUILD_ID
     DISCORD_CHANNEL_ID = CHANNEL_ID
 
-# Load tokens/keys from environment
-DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GUILD_ID = os.getenv("DISCORD_GUILD_ID")   # optional
-CHANNEL_ID = os.getenv("DISCORD_CHANNEL_ID")  # optional
+# Exports for discord_bot_runner
+__all__ = ["bot", "client", "groq_service", "settings"]
 
-# Intents
-intents = discord.Intents.default()
-intents.messages = True
-intents.message_content = True
-
-# Bot with "!" command prefix
-bot = commands.Bot(command_prefix="!", intents=intents)
-
-# Groq client
-client = Groq(api_key=GROQ_API_KEY)
-
-@bot.event
-async def on_ready():
-    print(f"✅ Logged in as {bot.user} (ID: {bot.user.id})")
-
-# Avoid conflict with built-in help by renaming
-
-@bot.event
-async def on_message(message: discord.Message):
-    if message.author.bot:
-        return
-
-    # If it's a command, let discord.py handle it
-    if message.content.startswith("!"):
-        await bot.process_commands(message)
-        return
-
-    # Optional restrictions
-    if GUILD_ID and str(message.guild.id) != str(GUILD_ID):
-        return
-    if CHANNEL_ID and str(message.channel.id) != str(CHANNEL_ID):
-        return
-
-
-    # Natural language command parsing for all commands
-    content_lower = message.content.lower().strip()
-    ctx = await bot.get_context(message)
-    # status
-    if content_lower in ["status", "show status", "bot status", "system status"]:
-        await status(ctx)
-        return
-    # assign
-    if content_lower.startswith("assign task to "):
-        parts = content_lower.split("assign task to ", 1)[-1].split(" ", 1)
-        if len(parts) == 2:
-            user_mention, task = parts
-            user = None
-            for member in message.guild.members:
-                if member.mention == user_mention:
-                    user = member
-                    break
-            if user:
-                await assign_task(ctx, user, task=task)
-                return
-    # triage
-    if content_lower.startswith("triage"):
-        await triage_issues(ctx)
-        return
-    # roadmap
-    if content_lower.startswith("roadmap") or content_lower.startswith("generate roadmap"):
-        await generate_roadmap(ctx)
-        return
-    # recognize
-    if content_lower.startswith("recognize contributors") or content_lower.startswith("thank contributors"):
-        await recognize_contributors(ctx)
-        return
-    # report
-    if content_lower.startswith("report"):
-        period = "weekly"
-        if "monthly" in content_lower:
-            period = "monthly"
-        await executive_report(ctx, period=period)
-        return
-    # alerts
-    if content_lower.startswith("alerts") or content_lower.startswith("enable alerts"):
-        await real_time_alerts(ctx)
-        return
-    # poll
-    if content_lower.startswith("poll ") or content_lower.startswith("start poll "):
-        question = content_lower.replace("start poll ", "").replace("poll ", "")
-        await idea_poll(ctx, question=question)
-        return
-    # docupdate
-    if content_lower.startswith("docupdate") or content_lower.startswith("update docs"):
-        await status(ctx)
-        return
-    # automerge
-    if content_lower.startswith("automerge") or content_lower.startswith("auto merge"):
-        await auto_merge(ctx)
-        return
-    # onboard
-    if content_lower.startswith("onboard "):
-        user_mention = content_lower.split("onboard ", 1)[-1].strip()
-        user = None
-        for member in message.guild.members:
-            if member.mention == user_mention:
-                user = member
-                break
-        if user:
-            await onboarding(ctx, user)
-            return
-    # customcmd
-    if content_lower.startswith("customcmd ") or content_lower.startswith("custom command "):
-        parts = content_lower.replace("customcmd ", "").replace("custom command ", "").split(" ", 1)
-        if len(parts) == 2:
-            name, action = parts
-            await custom_command(ctx, name, action=action)
-            return
-    # security
-    if content_lower.startswith("security scan") or content_lower.startswith("security"):
-        await security_scan(ctx)
-        return
-    # codereview
-    if content_lower.startswith("codereview ") or content_lower.startswith("code review "):
-        pr_id = content_lower.replace("codereview ", "").replace("code review ", "").strip()
-        await code_review(ctx, pr_id=pr_id)
-        return
-    # language
-    if content_lower.startswith("set language ") or content_lower.startswith("language "):
-        lang = content_lower.replace("set language ", "").replace("language ", "").strip()
-        await set_language(ctx, lang=lang)
-        return
-
-    # Otherwise, handle as normal AI chat
-    try:
-        async with message.channel.typing():
-            completion = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[
-                    {"role": "system", "content": "You are Monsterrr, a helpful Discord AI bot."},
-                    {"role": "user", "content": message.content},
-                ],
-            )
-            ai_response = completion.choices[0].message.content
-        await message.channel.send(ai_response)
-    except Exception as e:
-        await message.channel.send(f"⚠️ AI Error: {str(e)}")
-
-# Compatibility shim for main.py expecting settings
-class settings:
-    DISCORD_BOT_TOKEN = DISCORD_TOKEN
-    GROQ_API_KEY = GROQ_API_KEY
-    DISCORD_GUILD_ID = GUILD_ID
-    DISCORD_CHANNEL_ID = CHANNEL_ID
+# End of file
