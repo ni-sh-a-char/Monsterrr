@@ -34,8 +34,10 @@ Monsterrr is a multi-agent, production-ready system that discovers, creates, and
 
 ---
 
+
 ## Features
 
+- **Web Search & Summarization:** Instantly search the web from Discord using `!search <query or url>` or natural language. Monsterrr fetches, crawls, and summarizes results like ChatGPT.
 - **AI-Driven Daily Planning:** Plans and executes exactly 3 meaningful contributions per day (repo creation or feature branch).
 - **Multi-Agent Architecture:** Includes MaintainerAgent, CreatorAgent, and IdeaGeneratorAgent for full org automation.
 - **Professional Daily Status Reports:** Sends quantifiable, transparent email reports with all ideas, actions, and metrics.
@@ -151,17 +153,19 @@ Monsterrr is a multi-agent, production-ready system that discovers, creates, and
 
 Monsterrr's Discord bot exposes every feature and service discussed, making your entire org manageable from Discord. All agents, automations, and analytics are available via professional, visually stunning commands and embeds.
 
+
 ### What You Can Do in Discord
 - **All Monsterrr features are accessible:** Ideas, status, roadmap, tasks, triage, analytics, code review, security scan, onboarding, contributor recognition, custom commands, integrations, and more.
+- **Web search from Discord:** Use `!search <query or url>` or just ask a question/paste a URL in chat. Monsterrr will search the web and summarize results like ChatGPT.
 - **Natural language support:** Converse with Monsterrr, guide or override daily actions, and get context-aware responses.
 - **Per-user memory:** The bot remembers your history for personalized help.
 - **Professional responses:** All commands use rich Discord embeds for clarity and branding.
 - **Real-time alerts, polls, and executive reports:** Stay updated and in control.
 
-### Example Discord Commands
 - `!guide` — Show all available commands and usage instructions.
 - `!status` — Get current Monsterrr system status.
 - `!ideas` — View top AI-generated ideas.
+- `!search <query or url>` — Search the web and summarize results (works with both commands and natural language).
 - `!roadmap <project>` — Generate a roadmap for a project.
 - `!assign <user> <task>` — Assign a task to a contributor.
 - `!tasks [user]` — View tasks for a user or all users.
@@ -240,8 +244,9 @@ Monsterrr's Discord bot exposes every feature and service discussed, making your
 - `!translate <lang> <text>` — Translate text to another language.
 - `!voice <audio>` — Process a voice command.
 
-**Natural Language:**
-You can converse with Monsterrr in natural language. The bot will understand context, remember your history, and respond intelligently.
+
+**Web Search & Natural Language:**
+You can converse with Monsterrr in natural language, ask questions, or paste a URL. The bot will search the web and summarize results like ChatGPT, in addition to all other features. The `!search` command is also available for explicit queries.
 
 ---
 

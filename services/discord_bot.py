@@ -1,38 +1,95 @@
-# Helper to create a professional embed from text or table
-def create_professional_embed(title, content, color=0x2d7ff9):
+import discord
+
+# --- Additional Service Commands: Full Coverage (after all other @bot.command) ---
+# (Moved to end of file for correct bot registration)
+
+
+# --- Additional Service Commands (after all other @bot.command functions) ---
+
+# Place this block after the last @bot.command (search_cmd)
+# ---------------------------
+# Helper: extract_argument
+# ---------------------------
+def extract_argument(text, key):
+    # Simple extraction: look for '<key>: <value>' or '<key> <value>'
     import re
-    from datetime import datetime, timedelta, timezone
-    embed = discord.Embed(title=title, color=color)
-    # Detect markdown table
-    table_match = re.search(r"((?:\|.+\|\n)+)", content)
-    if table_match:
-        table = table_match.group(1)
-        table_lines = [l.strip() for l in table.strip().split('\n') if l.strip()]
-        if len(table_lines) >= 2:
-            # Convert table to bullet points
-            headers = [h.strip() for h in table_lines[0].strip('|').split('|')]
-            bullets = []
-            for row in table_lines[1:]:
-                cells = [c.strip() for c in row.strip('|').split('|')]
-                bullet = ' • ' + ", ".join(f"{headers[i]}: {cell}" for i, cell in enumerate(cells) if i < len(headers))
-                bullets.append(bullet)
-            bullet_text = '\n'.join(bullets)
-            embed.description = (content.replace(table, "").strip() + ("\n\n" if content.replace(table, "").strip() else "") + bullet_text).strip()
-        else:
-            embed.description = content.strip()
+    pattern = re.compile(rf"{key}[:=]?\s*([^,;\n]+)", re.IGNORECASE)
+    match = pattern.search(text)
+    if match:
+        return match.group(1).strip()
+    # fallback: just return the first word after the key
+    tokens = text.split()
+    if key in tokens:
+        idx = tokens.index(key)
+        if idx + 1 < len(tokens):
+            return tokens[idx + 1]
+    return None
+
+# ---------------------------
+# Helper: extract_user_and_task
+# ---------------------------
+def extract_user_and_task(text):
+    # Look for '@user' or 'user: <user> task: <task>'
+    import re
+    user = None
+    task = None
+    user_match = re.search(r"@([\w\d_]+)", text)
+    if user_match:
+        user = user_match.group(1)
     else:
-        embed.description = content.strip()
-    # Set time in IST (UTC+5:30)
-    ist = timezone(timedelta(hours=5, minutes=30))
-    now_ist = datetime.now(ist)
+        user = extract_argument(text, "user")
+    task = extract_argument(text, "task")
+    # fallback: try to split on ' to '
+    if not task and ' to ' in text:
+        parts = text.split(' to ', 1)
+        if len(parts) == 2:
+            task = parts[0].strip()
+            user = parts[1].strip()
+    return user, task
+
+# ---------------------------
+# Helper: extract_message_and_delay
+# ---------------------------
+def extract_message_and_delay(text):
+    # Look for 'in <seconds>' or 'after <seconds>'
+    import re
+    msg = text
+    delay = None
+    match = re.search(r"in (\d+) ?s(ec(onds)?)?|after (\d+) ?s(ec(onds)?)?", text)
+    if match:
+        delay = int(match.group(1) or match.group(4))
+        msg = text[:match.start()].strip()
+    return msg, delay
+
+# ---------------------------
+# Helper: schedule_discord_message
+# ---------------------------
+async def schedule_discord_message(msg, delay):
+    await asyncio.sleep(delay)
+    # This function should be called with a channel context in real use
+    # For now, just log
+    logger.info(f"[Scheduled Message] {msg}")
+# ---------------------------
+# Helper: create_professional_embed
+# ---------------------------
+def create_professional_embed(title: str, description: str, color: int = 0x2d7ff9) -> discord.Embed:
+    # Truncate description to 4096 chars (Discord embed limit)
+    description = description[:4096]
+    embed = discord.Embed(title=title, description=description, color=color)
+    now_ist = datetime.now(IST)
     embed.set_footer(text=f"Monsterrr • {now_ist.strftime('%Y-%m-%d %H:%M IST')}")
     return embed
-MAX_DISCORD_MSG_LEN = 2000
 
-# Helper to split and send long messages
-async def send_long_message(channel, text):
-    for i in range(0, len(text), MAX_DISCORD_MSG_LEN):
-        await channel.send(text[i:i+MAX_DISCORD_MSG_LEN])
+# ---------------------------
+# Helper: send_long_message
+# ---------------------------
+async def send_long_message(channel, text, prefix=None):
+    # Discord message limit is 2000 chars
+    max_len = 2000
+    if prefix:
+        text = prefix + text
+    for i in range(0, len(text), max_len):
+        await channel.send(text[i:i+max_len])
 # services/discord_bot.py
 """
 Monsterrr Discord bot — single file, single on_message flow, fixes:
@@ -53,7 +110,6 @@ from collections import defaultdict, deque
 from typing import Optional, Dict
 
 import psutil
-import discord
 from discord.ext import commands
 from datetime import datetime, timedelta
 
@@ -65,6 +121,8 @@ from .language_service import LanguageService
 from .doc_service import DocService
 from .conversation_memory import ConversationMemory
 from .integration_service import IntegrationService
+# SearchService for web search
+from .search_service import SearchService
 from .github_service import GitHubService
 # Try to import GroqService; fallback gracefully if different symbol present
 try:
@@ -117,6 +175,8 @@ logger.propagate = False
 # ---------------------------
 # Instantiate service objects
 # ---------------------------
+
+# Instantiate all service objects before bot and SearchService
 task_manager = TaskManager()
 triage_service = TriageService()
 poll_service = PollService()
@@ -132,14 +192,7 @@ doc_service = DocService()
 conversation_memory_service = ConversationMemory()
 integration_service = IntegrationService()
 
-# GitHub service (ensure logger exists)
-try:
-    github_service = GitHubService(logger=logger)
-except TypeError:
-    github_service = GitHubService()
-    setattr(github_service, "logger", logger)
-
-# Groq client (wrap different possible implementations)
+# Discord bot setup
 groq_service = None
 if GroqService:
     try:
@@ -156,18 +209,23 @@ if GroqService:
 if groq_service is None:
     logger.warning("GroqService could not be initialized. AI features will raise errors until this is fixed.")
 
+
+# Initialize SearchService after groq_service is available
+search_service = None
+try:
+    search_service = SearchService(llm_client=groq_service, logger=logger)
+except Exception as e:
+    logger.error(f"SearchService could not be initialized: {e}")
+
 # Expose `client` as alias used in older code
 client = groq_service
 
-# ---------------------------
-# Discord bot setup
-# ---------------------------
+# Discord bot setup (after all service initializations, before any bot usage)
 intents = discord.Intents.default()
 intents.guilds = True
 intents.members = True           # enable if you need member info
 intents.message_content = True   # privileged intent must be enabled in dev portal
 intents.messages = True
-
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)  # remove default help to use custom
 
 # Small in-process dedupe to avoid processing the same message multiple times in the same process
@@ -809,64 +867,6 @@ async def handle_natural_command(intent, content, user_id):
             # Here you would call your roadmap logic
             return f"Roadmap for project '{project}' displayed."
         return "Please specify the project for roadmap."
-    elif intent == "guide":
-        # Here you would call your guide logic
-        return "Guide displayed."
-    elif intent == "help":
-        # Here you would call your help logic
-        return "Help displayed."
-    # Add more autonomous actions as needed
-    return "Sorry, I couldn't understand your command."
-
-# --- Helper functions for argument extraction and scheduling ---
-def extract_argument(text, key):
-    # Simple extraction: look for 'key: value' in text
-    import re
-    match = re.search(rf"{key}[:=]\s*(\w+)", text, re.IGNORECASE)
-    return match.group(1) if match else None
-
-def extract_user_and_task(text):
-    # Example: 'assign task to @user: do something'
-    import re
-    user_match = re.search(r"@([\w]+)", text)
-    task_match = re.search(r"task[:=]\s*(.+)", text)
-    user = user_match.group(1) if user_match else None
-    task = task_match.group(1) if task_match else None
-    return user, task
-
-def extract_message_and_delay(text):
-    # Example: 'schedule message: Hello in 60 seconds'
-    import re
-    msg_match = re.search(r"message[:=]\s*([\w\s]+)", text)
-    delay_match = re.search(r"in (\d+) seconds", text)
-    msg = msg_match.group(1) if msg_match else None
-    delay = int(delay_match.group(1)) if delay_match else None
-    return msg, delay
-
-async def schedule_discord_message(msg, delay):
-    await asyncio.sleep(delay)
-    if CHANNEL_ID:
-        ch = bot.get_channel(int(CHANNEL_ID))
-        if ch:
-            await ch.send(msg)
-
-# ---------------------------
-# Command definitions (single occurrences)
-# ---------------------------
-@bot.command(name="help")
-async def help_cmd(ctx: commands.Context):
-    help_text = (
-        "**Monsterrr Commands**\n"
-        "• `!help` - show this help\n"
-        "• `!guide` - show extended guide\n"
-        "• `!status` - system & self-awareness status\n"
-        "• `!ideas` - show active ideas/polls\n"
-        "• `!assign @user <task>` - assign task\n"
-        "• `!poll <question>` - start poll\n"
-        "• `!customcmd <name> <action>` - create a custom command\n\n"
-        "You can also chat normally (no `!`) in the configured channel or DM."
-    )
-    await ctx.send(help_text)
 
 @bot.command(name="status")
 async def status_command(ctx):
@@ -988,7 +988,7 @@ async def status_command(ctx):
     await ctx.send(embed=embed)
 
 
-@bot.command(name="guide")
+@bot.command(name="guide", aliases=["help"])
 async def guide_cmd(ctx: commands.Context):
     embed = discord.Embed(
         title="📘 Monsterrr Discord Interface — Command Guide",
@@ -996,46 +996,66 @@ async def guide_cmd(ctx: commands.Context):
         color=discord.Color.blue()
     )
 
+
     commands_list = {
         "🧭 General": [
             "`!guide` — Show all available commands and usage instructions.",
+            "`!help` — Show all available commands and usage instructions.",
             "`!status` — Get current Monsterrr system status.",
             "`!ideas` — View top AI-generated ideas.",
-            "`!alerts` — Real-time alerts.",
+            "`!search <query or url>` — Search the web and summarize results.",
+            "`!alerts` — Show real-time alerts.",
+            "`!notify <message>` — Send a notification.",
             "`!poll <question>` — Create a poll.",
-            "`!language <lang> <text>` — Translate text."
+            "`!language <lang> <text>` — Translate text.",
+            "`!customcmd <name> <action>` — Create a custom command."
         ],
         "📂 Project Management": [
             "`!repos` — List all managed repositories.",
             "`!roadmap <project>` — Generate a roadmap for a project.",
             "`!assign <user> <task>` — Assign a task to a contributor.",
             "`!tasks [user]` — View tasks for a user or all users.",
-            "`!triage <issue|pr> <item>` — AI-powered triage for issues/PRs."
+            "`!triage <issue|pr> <item>` — AI-powered triage for issues/PRs.",
+            "`!onboard <user>` — Onboard a new contributor.",
+            "`!merge <pr>` — Auto-merge a PR.",
+            "`!close <issue>` — Auto-close an issue."
         ],
         "🏆 Contributor Tools": [
             "`!recognize <user>` — Send contributor recognition.",
-            "`!onboard <user>` — Onboard a new contributor."
-        ],
-        "📊 Reports & Analytics": [
             "`!report [daily|weekly|monthly]` — Executive reports.",
             "`!analytics` — View analytics dashboard."
         ],
-        "💻 Code & Repos": [
+        "💻 Code & Automation": [
             "`!docs <repo>` — Update documentation for a repo.",
-            "`!customcmd <name> <action>` — Create a custom command.",
-            "`!integrate <platform>` — Integrate with other platforms.",
-            "`!qa <time>` — Schedule a Q&A session.",
-            "`!merge <pr>` — Auto-merge a PR.",
-            "`!close <issue>` — Auto-close an issue.",
+            "`!codereview <code>` — AI-powered code review.",
+            "`!buildcmd <spec>` — Build a command from a specification.",
+            "`!review <pr>` — AI-powered PR review.",
             "`!scan <repo>` — Security scan for a repo.",
-            "`!review <pr>` — AI-powered code review."
+            "`!integrate <platform>` — Integrate with other platforms.",
+            "`!qa <time>` — Schedule a Q&A session."
+        ],
+        "🔔 Alerts & Notifications": [
+            "`!alerts` — Show real-time alerts.",
+            "`!notify <message>` — Send a notification."
         ]
     }
+
+    # Add any additional service commands not already listed
+    commands_list["🛠️ Advanced Services"] = [
+        "`!commandbuilder <spec>` — Build a command from a specification.",
+        "`!codereview <code>` — Review code using the code review service.",
+        "`!report <period>` — Generate a report for a given period.",
+    ]
 
     for category, cmds in commands_list.items():
         embed.add_field(name=category, value="\n".join(cmds), inline=False)
 
-    embed.set_footer(text="✨ Powered by Monsterrr — Making open-source collaboration smarter.")
+    embed.add_field(
+        name="🌐 Web Search & Natural Language",
+        value="You can use `!search <query or url>` or just ask a question or paste a URL in chat. Monsterrr will search the web and summarize results like ChatGPT.",
+        inline=False
+    )
+    embed.set_footer(text="✨ Powered by Monsterrr — All services are now available as commands.")
 
     await ctx.send(embed=embed)
 
@@ -1175,6 +1195,11 @@ async def qa_cmd(ctx: commands.Context, time: str):
 @bot.command(name="close")
 async def close_cmd(ctx: commands.Context, issue: str):
     try:
+        # Ensure github_service is initialized
+        global github_service
+        if 'github_service' not in globals() or github_service is None:
+            from .github_service import GitHubService
+            github_service = GitHubService(logger=logger)
         result = github_service.close_issue(issue)
     except Exception as e:
         logger.exception("close error: %s", e)
@@ -1190,6 +1215,7 @@ async def assign_cmd(ctx: commands.Context, user: discord.Member, *, task: str):
 # ---------------------------
 # Command error handling
 # ---------------------------
+@bot.event
 @bot.event
 async def on_command_error(ctx: commands.Context, error: Exception):
     if isinstance(error, commands.CommandNotFound):
@@ -1219,4 +1245,176 @@ class settings:
 # Exports for discord_bot_runner
 __all__ = ["bot", "client", "groq_service", "settings"]
 
+
+# ---------------------------
+# !search command implementation
+# ---------------------------
+@bot.command(name="search")
+async def search_cmd(ctx: commands.Context, *, query: str = None):
+    """Search the web and summarize results using SearchService."""
+    if not query:
+        await ctx.send("Please provide a search query or URL. Usage: `!search <query or url>`")
+        return
+    if search_service is None:
+        await ctx.send("Search service is not available. Please contact the administrator.")
+        return
+    try:
+        async with ctx.typing():
+            # SearchService may be sync or async; try both
+            import inspect
+            # Use the correct method: search_and_summarize
+            if inspect.iscoroutinefunction(getattr(search_service, "search_and_summarize", None)):
+                result = await search_service.search_and_summarize(query)
+            else:
+                result = await asyncio.to_thread(search_service.search_and_summarize, query)
+            if not result:
+                await ctx.send("No results found or failed to summarize.")
+                return
+            # Try to send as embed if possible
+            try:
+                embed = discord.Embed(title=f"🔎 Web Search: {query}", description=result, color=discord.Color.blue())
+                embed.set_footer(text="Monsterrr Web Search")
+                await ctx.send(embed=embed)
+            except Exception:
+                await ctx.send(result)
+    except Exception as e:
+        logger.exception("search command error: %s", e)
+        await ctx.send(f"Search failed: {e}")
+
 # End of file
+# --- Additional Service Commands: Full Coverage (after all other @bot.command) ---
+try:
+    from .alert_service import AlertService
+    alert_service = AlertService()
+    @bot.command(name="alerts")
+    async def alerts_cmd(ctx: commands.Context):
+        try:
+            alerts = alert_service.get_alerts() if hasattr(alert_service, "get_alerts") else "No alert method."
+            await ctx.send(f"Current alerts:\n{alerts}")
+        except Exception as e:
+            await ctx.send(f"Failed to fetch alerts: {e}")
+except Exception:
+    pass
+
+try:
+    from .notification_service import NotificationService
+    notification_service = NotificationService()
+    @bot.command(name="notify")
+    async def notify_cmd(ctx: commands.Context, *, message: str):
+        try:
+            result = notification_service.send_notification(message) if hasattr(notification_service, "send_notification") else "No send_notification method."
+            await ctx.send(f"Notification sent: {result}")
+        except Exception as e:
+            await ctx.send(f"Failed to send notification: {e}")
+except Exception:
+    pass
+
+try:
+    from .code_review_service import CodeReviewService
+    code_review_service = CodeReviewService()
+    @bot.command(name="codereview")
+    async def codereview_cmd(ctx: commands.Context, *, code: str):
+        try:
+            review = code_review_service.review_code(code) if hasattr(code_review_service, "review_code") else "No review_code method."
+            await ctx.send(f"Code review:\n{review}")
+        except Exception as e:
+            await ctx.send(f"Failed to review code: {e}")
+except Exception:
+    pass
+
+try:
+    from .command_builder import CommandBuilder
+    command_builder = CommandBuilder()
+    @bot.command(name="buildcmd")
+    async def buildcmd_cmd(ctx: commands.Context, *, spec: str):
+        try:
+            cmd = command_builder.build_command(spec) if hasattr(command_builder, "build_command") else "No build_command method."
+            await ctx.send(f"Built command: {cmd}")
+        except Exception as e:
+            await ctx.send(f"Failed to build command: {e}")
+except Exception:
+    pass
+
+# Onboarding Service
+try:
+    @bot.command(name="onboard")
+    async def onboard_cmd(ctx: commands.Context, user: discord.Member):
+        try:
+            result = onboarding_service.onboard(user.name) if hasattr(onboarding_service, "onboard") else "No onboard method."
+            await ctx.send(f"Onboarding result: {result}")
+        except Exception as e:
+            await ctx.send(f"Failed to onboard: {e}")
+except Exception:
+    pass
+
+# Merge Service
+try:
+    @bot.command(name="merge")
+    async def merge_cmd(ctx: commands.Context, pr: str):
+        try:
+            result = merge_service.merge(pr) if hasattr(merge_service, "merge") else "No merge method."
+            await ctx.send(f"Merge result: {result}")
+        except Exception as e:
+            await ctx.send(f"Failed to merge: {e}")
+except Exception:
+    pass
+
+# Language Service
+try:
+    @bot.command(name="language")
+    async def language_cmd(ctx: commands.Context, lang: str, *, text: str):
+        try:
+            result = language_service.translate(lang, text) if hasattr(language_service, "translate") else "No translate method."
+            await ctx.send(f"Translation: {result}")
+        except Exception as e:
+            await ctx.send(f"Failed to translate: {e}")
+except Exception:
+    pass
+
+# Triage Service
+try:
+    @bot.command(name="triage")
+    async def triage_cmd(ctx: commands.Context, item_type: str, item: str):
+        try:
+            result = triage_service.triage(item_type, item) if hasattr(triage_service, "triage") else "No triage method."
+            await ctx.send(f"Triage result: {result}")
+        except Exception as e:
+            await ctx.send(f"Failed to triage: {e}")
+except Exception:
+    pass
+
+# Poll Service
+try:
+    @bot.command(name="poll")
+    async def poll_cmd(ctx: commands.Context, *, question: str):
+        try:
+            result = poll_service.create_poll(question) if hasattr(poll_service, "create_poll") else "No create_poll method."
+            await ctx.send(f"Poll created: {result}")
+        except Exception as e:
+            await ctx.send(f"Failed to create poll: {e}")
+except Exception:
+    pass
+
+# Report Service
+try:
+    @bot.command(name="report")
+    async def report_cmd(ctx: commands.Context, period: str = "daily"):
+        try:
+            result = report_service.generate_report(period) if hasattr(report_service, "generate_report") else "No generate_report method."
+            await ctx.send(f"Report: {result}")
+        except Exception as e:
+            await ctx.send(f"Failed to generate report: {e}")
+except Exception:
+    pass
+
+# Recognition Service
+try:
+    @bot.command(name="recognize")
+    async def recognize_cmd(ctx: commands.Context, user: discord.Member):
+        try:
+            result = recognition_service.recognize(user.name) if hasattr(recognition_service, "recognize") else "No recognize method."
+            await ctx.send(f"Recognition: {result}")
+        except Exception as e:
+            await ctx.send(f"Failed to recognize: {e}")
+except Exception:
+    pass

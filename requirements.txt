@@ -18,3 +18,5 @@ discord.py
 translate
 psutil
 honcho
+ddgs
+crawl4ai
