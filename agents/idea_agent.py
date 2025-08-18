@@ -152,8 +152,9 @@ class IdeaGeneratorAgent:
         prompt = (
             f"Given the following trending open-source project ideas, summarize, filter for uniqueness and impact, "
             f"and rank the top {top_n} ideas. For each, provide: name, description, tech stack, difficulty (easy/med/hard), "
-            f"estimated dev time (weeks), and a 3-5 bullet roadmap. Output as JSON list.\n\n"
-            f"Ideas: {json.dumps(deduped)[:4000]}"
+            f"estimated dev time (weeks), and a 3-5 bullet roadmap."
+            f"\n\nIMPORTANT: Do NOT use tables in your answer. Instead, present all lists and structured data as professional, visually clear bullet points. Each idea should be a separate bullet with its details as sub-bullets."
+            f"\n\nIdeas: {json.dumps(deduped)[:4000]}"
         )
         try:
             self.logger.info(f"[IdeaGeneratorAgent] Groq ranking prompt: {prompt[:1000]}")

@@ -1,3 +1,38 @@
+# Helper to create a professional embed from text or table
+def create_professional_embed(title, content, color=0x2d7ff9):
+    import re
+    from datetime import datetime, timedelta, timezone
+    embed = discord.Embed(title=title, color=color)
+    # Detect markdown table
+    table_match = re.search(r"((?:\|.+\|\n)+)", content)
+    if table_match:
+        table = table_match.group(1)
+        table_lines = [l.strip() for l in table.strip().split('\n') if l.strip()]
+        if len(table_lines) >= 2:
+            # Convert table to bullet points
+            headers = [h.strip() for h in table_lines[0].strip('|').split('|')]
+            bullets = []
+            for row in table_lines[1:]:
+                cells = [c.strip() for c in row.strip('|').split('|')]
+                bullet = ' • ' + ", ".join(f"{headers[i]}: {cell}" for i, cell in enumerate(cells) if i < len(headers))
+                bullets.append(bullet)
+            bullet_text = '\n'.join(bullets)
+            embed.description = (content.replace(table, "").strip() + ("\n\n" if content.replace(table, "").strip() else "") + bullet_text).strip()
+        else:
+            embed.description = content.strip()
+    else:
+        embed.description = content.strip()
+    # Set time in IST (UTC+5:30)
+    ist = timezone(timedelta(hours=5, minutes=30))
+    now_ist = datetime.now(ist)
+    embed.set_footer(text=f"Monsterrr • {now_ist.strftime('%Y-%m-%d %H:%M IST')}")
+    return embed
+MAX_DISCORD_MSG_LEN = 2000
+
+# Helper to split and send long messages
+async def send_long_message(channel, text):
+    for i in range(0, len(text), MAX_DISCORD_MSG_LEN):
+        await channel.send(text[i:i+MAX_DISCORD_MSG_LEN])
 # services/discord_bot.py
 """
 Monsterrr Discord bot — single file, single on_message flow, fixes:
@@ -54,7 +89,9 @@ from .security_service import SecurityService
 # ---------------------------
 MEMORY_LIMIT = 10
 conversation_memory: Dict[str, deque] = defaultdict(lambda: deque(maxlen=MEMORY_LIMIT))
-STARTUP_TIME = datetime.utcnow()
+from datetime import datetime, timedelta, timezone
+IST = timezone(timedelta(hours=5, minutes=30))
+STARTUP_TIME = datetime.now(IST)
 total_messages = 0
 unique_users = set()
 custom_commands: Dict[str, str] = {}
@@ -147,11 +184,12 @@ def _mark_processed(msg_id: int):
 # ---------------------------
 def format_embed(title: str, description: str, color: int = 0x2d7ff9) -> discord.Embed:
     embed = discord.Embed(title=title, description=description, color=color)
-    embed.set_footer(text=f"Monsterrr • Status at: {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}")
+    now_ist = datetime.now(IST)
+    embed.set_footer(text=f"Monsterrr • Status at: {now_ist.strftime('%Y-%m-%d %H:%M IST')}")
     return embed
 
 def get_system_context(user_id: Optional[str] = None) -> str:
-    now = datetime.utcnow()
+    now = datetime.now(IST)
     uptime = str(now - STARTUP_TIME).split(".")[0]
     recent_user_msgs = []
     if user_id and user_id in conversation_memory:
@@ -171,8 +209,8 @@ def get_system_context(user_id: Optional[str] = None) -> str:
         hostname = "Unknown"
         ip = "Unknown"
     ctx = (
-        f"Current UTC time: {now.strftime('%Y-%m-%d %H:%M:%S')}. "
-        f"Startup: {STARTUP_TIME.strftime('%Y-%m-%d %H:%M:%S')}. "
+    f"Current IST time: {now.strftime('%Y-%m-%d %H:%M:%S IST')}. "
+    f"Startup: {STARTUP_TIME.strftime('%Y-%m-%d %H:%M:%S IST')}. "
         f"Uptime: {uptime}. "
         f"Model: {GROQ_MODEL}. "
         f"Total messages received: {total_messages}. "
@@ -243,7 +281,7 @@ async def send_startup_message_once():
             if ch:
                 status_text = (
                     f"**🤖 Monsterrr System Status**\n"
-                    f"Startup time: {STARTUP_TIME.strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
+                    f"Startup time: {STARTUP_TIME.strftime('%Y-%m-%d %H:%M:%S IST')}\n"
                     f"Model: {GROQ_MODEL}\n\n"
                     f"**Discord Stats:**\n• Guilds: {len(bot.guilds)}\n• Members: {sum(g.member_count for g in bot.guilds)}\n"
                 )
@@ -271,7 +309,7 @@ async def send_hourly_status_report():
                     # Gather professional status report data
                     status_text = (
                         f"**🤖 Monsterrr System Status**\n"
-                        f"Startup time: {STARTUP_TIME.strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
+                        f"Startup time: {STARTUP_TIME.strftime('%Y-%m-%d %H:%M:%S IST')}\n"
                         f"Model: {GROQ_MODEL}\n"
                         f"Guilds: {len(bot.guilds)}\nMembers: {sum(g.member_count for g in bot.guilds)}\n"
                         f"Total messages: {total_messages}\n"
@@ -307,8 +345,8 @@ def build_daily_report():
             state = __import__("json").load(f)
     except Exception:
         state = {}
-    now = datetime.utcnow()
-    startup = STARTUP_TIME.strftime('%Y-%m-%d %H:%M:%S UTC')
+    now = datetime.now(IST)
+    startup = STARTUP_TIME.strftime('%Y-%m-%d %H:%M:%S IST')
     uptime = str(now - STARTUP_TIME).split(".")[0]
     ideas = state.get("ideas", {}).get("top_ideas", [])
     repos = state.get("repos", [])
@@ -348,7 +386,7 @@ def build_daily_report():
             html += f"<li><b>{user}</b>: {', '.join(tlist)}</li>"
         html += "</ul>"
     html += f"<hr style='border:0;border-top:1px solid #e3e7ee;margin:18px 0;'>"
-    html += f"<p style='font-size:0.95em;color:#888;'>Report generated at {now.strftime('%Y-%m-%d %H:%M UTC')}</p>"
+    html += f"<p style='font-size:0.95em;color:#888;'>Report generated at {now.strftime('%Y-%m-%d %H:%M IST')}</p>"
     html += "</div>"
     subject = f"Monsterrr Daily Report | {now.strftime('%Y-%m-%d')}"
     return subject, html
@@ -424,25 +462,48 @@ async def on_message(message: discord.Message):
     global total_messages
     total_messages += 1
 
-    # --- Natural Language Command Parsing ---
-    # Simple intent detection: if message contains certain keywords, treat as command
-    command_intents = [
-        ("create repo", "create_repository"),
-        ("assign task", "assign_task"),
-        ("show ideas", "show_ideas"),
-        ("status", "show_status"),
-        ("add idea", "add_idea"),
-        ("merge", "merge_pull_request"),
-        # Add more as needed
-    ]
-    intent = None
-    for kw, cmd in command_intents:
-        if kw in content.lower():
-            intent = cmd
-            break
-
+    # --- Enhanced Natural Language Understanding ---
+    # Use LLM to classify intent: command or general query
     system_ctx = get_system_context(user_id)
-    prompt_lines = [f"SYSTEM: {system_ctx}", "", "CONVERSATION:"]
+    classify_prompt = (
+        f"SYSTEM: You are an AI assistant for a GitHub org. "
+        f"NEVER use tables, pipes (|), or any table-like formatting in your answers. "
+        f"For all lists or structured data, ALWAYS use bullet points, sub-points, and numbering for clarity. "
+        f"Classify the following user message as either a 'command' (if it requests an action, e.g. create repo, assign task, merge PR, etc.) "
+        f"or a 'query' (if it is a general question or conversation). "
+        f"If it is a command, also extract the intent (e.g. create_repository, assign_task, show_ideas, etc.). "
+        f"Return a JSON object: {{'type': 'command'|'query', 'intent': <intent or null>}}.\n\nUser message: {content}"
+    )
+    try:
+        classification = await asyncio.to_thread(_call_groq, classify_prompt, GROQ_MODEL)
+        import json as _json
+        parsed = _json.loads(classification)
+        intent_type = parsed.get('type')
+        intent = parsed.get('intent')
+    except Exception:
+        # Fallback to keyword matching if LLM fails
+        command_intents = [
+            ("create repo", "create_repository"),
+            ("assign task", "assign_task"),
+            ("show ideas", "show_ideas"),
+            ("status", "show_status"),
+            ("add idea", "add_idea"),
+            ("merge", "merge_pull_request"),
+            # Add more as needed
+        ]
+        intent = None
+        intent_type = 'query'
+        for kw, cmd in command_intents:
+            if kw in content.lower():
+                intent = cmd
+                intent_type = 'command'
+                break
+
+    prompt_lines = [
+        f"SYSTEM: {system_ctx}",
+        "IMPORTANT: NEVER use tables, pipes (|), or any table-like formatting in your answers. For all lists or structured data, ALWAYS use bullet points, sub-points, and numbering for clarity.",
+        "",
+        "CONVERSATION:"]
     for m in conversation_memory[user_id]:
         role = m.get("role", "user")
         prompt_lines.append(f"{role.upper()}: {m.get('content','')}")
@@ -450,22 +511,31 @@ async def on_message(message: discord.Message):
 
     try:
         async with message.channel.typing():
-            if intent:
-                # Example: call a function based on intent
+            if intent_type == 'command' and intent:
                 reply = await handle_natural_command(intent, content, user_id)
                 conversation_memory[user_id].append({"role": "assistant", "content": reply})
-                await message.channel.send(reply)
+                # Try to send as embed if possible
+                try:
+                    embed = create_professional_embed("Monsterrr Command Result", reply)
+                    await message.channel.send(embed=embed)
+                except Exception:
+                    await send_long_message(message.channel, reply)
             else:
                 ai_reply = await asyncio.to_thread(_call_groq, prompt, GROQ_MODEL)
                 if not ai_reply:
-                    await message.channel.send("Sorry, I couldn't generate a response.")
+                    await send_long_message(message.channel, "Sorry, I couldn't generate a response.")
                     return
                 conversation_memory[user_id].append({"role": "assistant", "content": ai_reply})
-                await message.channel.send(ai_reply)
+                # Try to send as embed if possible
+                try:
+                    embed = create_professional_embed("Monsterrr", ai_reply)
+                    await message.channel.send(embed=embed)
+                except Exception:
+                    await send_long_message(message.channel, ai_reply)
     except Exception as e:
         logger.exception("AI reply failed: %s", e)
         try:
-            await message.channel.send(f"⚠️ AI Error: {e}")
+            await send_long_message(message.channel, f"⚠️ AI Error: {e}")
         except Exception:
             pass
 
@@ -800,7 +870,10 @@ async def help_cmd(ctx: commands.Context):
 
 @bot.command(name="status")
 async def status_command(ctx):
+
     import json
+    import psutil
+    import socket
     from datetime import datetime
 
     try:
@@ -809,67 +882,109 @@ async def status_command(ctx):
     except Exception:
         state = {}
 
-    user_id = str(ctx.author.id)
-    raw_context = get_system_context(user_id)  # This returns the long one-liner
+    now_ist = datetime.now(IST)
+    uptime = str(now_ist - STARTUP_TIME).split(".")[0]
     guild_count = len(bot.guilds)
     member_count = sum(guild.member_count for guild in bot.guilds)
-
     ideas = state.get("ideas", {}).get("top_ideas", [])
     repos = state.get("repos", [])
     analytics = state.get("analytics", {})
+    tasks = state.get("tasks", {})
 
-    # --- Format the context into readable lines ---
-    def format_context(text: str) -> str:
-        # Split on ". " to break sentences into items
-        parts = [p.strip() for p in text.split(". ") if p.strip()]
-        formatted = []
-        for p in parts:
-            if ": " in p:
-                key, val = p.split(": ", 1)
-                formatted.append(f"• **{key.strip()}:** {val.strip()}")
-            else:
-                formatted.append(p)  # fallback for sentences without colon
-        return "\n".join(formatted)
+    # System resource usage
+    try:
+        cpu = psutil.cpu_percent(interval=0.1)
+        mem = psutil.virtual_memory()
+        mem_usage = f"{mem.percent:.1f}% (≈ {mem.used // (1024**2)} MB of {mem.total // (1024**2)} MB allocated)"
+    except Exception:
+        cpu = "N/A"
+        mem_usage = "N/A"
+    try:
+        hostname = socket.gethostname()
+        ip = socket.gethostbyname(hostname)
+    except Exception:
+        hostname = "Unknown"
+        ip = "Unknown"
 
-    context = format_context(raw_context)
+    # Recent user activity (last 3 messages)
+    recent_users = list(unique_users)[-3:] if unique_users else []
+    recent_msgs = []
+    for uid in recent_users:
+        if uid in conversation_memory:
+            recent_msgs.extend([m["content"] for m in conversation_memory[uid] if m.get("role") == "user"])
+    recent_msgs = recent_msgs[-3:] if recent_msgs else []
 
-    # Build Embed
+    # Org-wide health indicators
+    pr_count = state.get("pull_requests", {}).get("count", 0)
+    pr_age = state.get("pull_requests", {}).get("avg_age_days", "N/A")
+    issue_count = state.get("issues", {}).get("count", 0)
+    issue_crit = state.get("issues", {}).get("critical", 0)
+    issue_high = state.get("issues", {}).get("high", 0)
+    issue_med = state.get("issues", {}).get("medium", 0)
+    issue_low = state.get("issues", {}).get("low", 0)
+    ci_status = state.get("ci", {}).get("status", "N/A")
+    ci_duration = state.get("ci", {}).get("avg_duration", "N/A")
+    sec_crit = state.get("security", {}).get("critical_alerts", 0)
+    sec_warn = state.get("security", {}).get("warnings", 0)
+
+    # Automation bots
+    bots = state.get("automation_bots", {})
+    bots_status = []
+    for bot_name, bot_info in bots.items():
+        bots_status.append(f"• {bot_name} – {bot_info}")
+
+    # Current tasks in the queue
+    queue = state.get("queue", [])
+    queue_lines = [f"• {task}" for task in queue] if queue else ["• No active tasks in the queue."]
+
+    # Next actions (suggestions)
+    next_actions = state.get("next_actions", [
+        "Deploy any of the ideas you liked from the previous list.",
+        "Provide a deeper dive into any metric (CPU spikes, memory trends, PR throughput).",
+        "Execute a specific automation (run the dependency scanner now, create a new repo, etc.)."
+    ])
+
+    # Compose professional, detailed status message
+    status_lines = [
+        f"**Current operational snapshot**",
+        f"- Uptime: {uptime} (started at {STARTUP_TIME.strftime('%Y-%m-%d %H:%M:%S IST')})",
+        f"- CPU load: {cpu} %",
+        f"- Memory usage: {mem_usage}",
+        f"- Hostname / IP: {hostname} / {ip}",
+        f"- Model in use: {GROQ_MODEL}",
+        f"- Recent user activity:"
+    ]
+    if recent_msgs:
+        for msg in recent_msgs:
+            status_lines.append(f"    • {msg}")
+    else:
+        status_lines.append("    • No recent user activity.")
+    status_lines.extend([
+        f"- Org-wide health indicators:",
+        f"    • Repository count: {len(repos)} active repos under the organization",
+        f"    • Pending pull-requests: {pr_count} (average age {pr_age} days)",
+        f"    • Open issues: {issue_count} (critical {issue_crit}, high {issue_high}, medium {issue_med}, low {issue_low})",
+        f"    • CI pipeline health: {ci_status}; average duration {ci_duration}",
+        f"    • Security alerts: {sec_crit} critical, {sec_warn} warnings pending triage",
+        f"- Automation bots:",
+    ])
+    if bots_status:
+        status_lines.extend(bots_status)
+    else:
+        status_lines.append("    • No automation bots configured.")
+    status_lines.append("- Current tasks in the queue:")
+    status_lines.extend(queue_lines)
+    status_lines.append("- What I can do next:")
+    for action in next_actions:
+        status_lines.append(f"    • {action}")
+
+    # Build embed
     embed = discord.Embed(
-        title="🟢 Monsterrr System Status",
-        description=f"**System Info**\n{context}\n\n**📌 Overview**\n"
-                    f"• 💡 **Ideas:** `{len(ideas)}`\n"
-                    f"• 📂 **Repos:** `{len(repos)}`\n"
-                    f"• 🌐 **Guilds:** `{guild_count}`\n"
-                    f"• 👥 **Members:** `{member_count}`",
+        title="� Monsterrr System Status",
+        description="\n".join(status_lines),
         color=discord.Color.green()
     )
-
-    # Top Ideas
-    if ideas:
-        top_ideas_text = "\n".join(
-            [f"{i+1}. 💡 {idea['name']}" for i, idea in enumerate(ideas[:3])]
-        )
-        embed.add_field(name="✨ Top Ideas", value=top_ideas_text, inline=False)
-
-    # Repos
-    if repos:
-        repos_text = "\n".join(
-            [f"{i+1}. 📂 {repo['name']}" for i, repo in enumerate(repos[:3])]
-        )
-        embed.add_field(name="📂 Active Repos", value=repos_text, inline=False)
-
-    # Analytics (if present in state.json separately)
-    if analytics:
-        analytics_text = "\n".join(
-            [f"• **{key.replace('_',' ').title()}:** {value}" for key, value in analytics.items()]
-        )
-        embed.add_field(name="📊 Analytics", value=analytics_text[:1024], inline=False)
-
-    # Footer
-    embed.set_footer(
-        text=f"Monsterrr • Status checked at {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
-    )
-
+    embed.set_footer(text=f"Monsterrr • {now_ist.strftime('%Y-%m-%d %H:%M IST')}")
     await ctx.send(embed=embed)
 
 

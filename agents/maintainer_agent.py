@@ -3,7 +3,8 @@ Maintainer Agent for Monsterrr.
 """
 
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+IST = timezone(timedelta(hours=5, minutes=30))
 import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from typing import List, Dict, Any
@@ -65,9 +66,11 @@ class MaintainerAgent:
             self.logger.error(f"[MaintainerAgent] Groq planning error: {e}")
             plan = []
         # Save plan to logs/daily_plan_<date>.json
-        date_str = datetime.utcnow().strftime("%Y-%m-%d")
-        save_path = save_path or f"logs/daily_plan_{date_str}.json"
+        date_str = datetime.now(IST).strftime("%Y-%m-%d")
+        save_path = f"logs/daily_plan_{date_str}.json"
         try:
+            import os
+            import json
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
             with open(save_path, "w", encoding="utf-8") as f:
                 json.dump(plan, f, indent=2)
@@ -208,7 +211,7 @@ class MaintainerAgent:
     def _is_stale(self, last_updated: str) -> bool:
         try:
             dt = datetime.strptime(last_updated, "%Y-%m-%dT%H:%M:%SZ")
-            return dt < datetime.utcnow() - timedelta(days=self.stale_days)
+            return dt < datetime.now(IST) - timedelta(days=self.stale_days)
         except Exception:
             return False
 
