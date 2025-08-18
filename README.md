@@ -81,7 +81,7 @@ Monsterrr is a multi-agent, production-ready system that discovers, creates, and
    ```ini
    # ==== Groq API ====
    GROQ_API_KEY=sk-...         # Your Groq API key
-   GROQ_MODEL=llama-3.3-70b-versatile  # Groq model name (default: llama-3.3-70b-versatile)
+   GROQ_MODEL=openai/gpt-oss-120b  # Groq model name (default: openai/gpt-oss-120b)
    GROQ_TEMPERATURE=0.2        # (Optional) Model temperature
    GROQ_MAX_TOKENS=2048        # (Optional) Max tokens for Groq responses
 
@@ -105,6 +105,7 @@ Monsterrr is a multi-agent, production-ready system that discovers, creates, and
    ```
 
    - **Fill in each field with your actual credentials and settings.**
+   - The default LLM model is now `openai/gpt-oss-120b`. You can change this in your `.env` if needed.
    - For Gmail, use an App Password (not your main password) and enable 2-Step Verification.
    - For GitHub, use a token with `repo` and `org` permissions.
    - You can add multiple emails to `STATUS_REPORT_RECIPIENTS` for team reports.

@@ -64,7 +64,7 @@ DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GUILD_ID = os.getenv("DISCORD_GUILD_ID")    # optional
 CHANNEL_ID = os.getenv("DISCORD_CHANNEL_ID")  # optional
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 
 # ---------------------------
 # Logger

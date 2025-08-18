@@ -22,8 +22,8 @@ class GroqService:
     def __init__(self, api_key: Optional[str] = None, logger=None, max_retries: int = 3, timeout: int = 30, fallback_models=None):
         load_dotenv()
         self.api_key = api_key or os.getenv("GROQ_API_KEY")
-        self.model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-        self.fallback_models = fallback_models or ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+        self.model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+        self.fallback_models = fallback_models or ["openai/gpt-oss-120b", "llama-3.1-8b-instant"]
         if not self.api_key:
             raise ValueError("Missing GROQ_API_KEY")
         if not self.model:

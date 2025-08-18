@@ -35,8 +35,12 @@ class MaintainerAgent:
         ]
         prompt = (
             f"You are Monsterrr, an autonomous GitHub org manager. Given the following org repo metadata, "
-            f"plan exactly {num_contributions} meaningful contributions for today. Each contribution must be either: "
-            f"(1) create a new repo (with AI-generated name, description, tech stack, roadmap), or (2) create a feature branch in an existing repo (with AI-generated branch name, short description, and a starter file/change idea). "
+            f"plan exactly {num_contributions} meaningful, substantial contributions for today. "
+            f"Each contribution must be a significant step toward a fully working, production-quality project. "
+            f"Write real, runnable code, not just stubs. Gradually build out features, tests, and documentation over time. "
+            f"Plan multi-day features and break them into daily tasks, so each day builds on the last. "
+            f"Each contribution must be either: (1) create a new repo (with AI-generated name, description, tech stack, roadmap), "
+            f"or (2) create a feature branch in an existing repo (with AI-generated branch name, short description, and a substantial starter file/change idea). "
             f"Branch names must be valid for Git, unique, and descriptive. Output a JSON list of contributions, each with type ('repo' or 'branch'), target repo (if branch), name, description, and details."
             f"\n\nOrg repo metadata: {json.dumps(repo_metadata)[:4000]}"
         )
