@@ -809,8 +809,8 @@ async def on_message(message: discord.Message):
                     await message.channel.send(embed=embed)
                 except Exception:
                     await send_long_message(message.channel, summary)
-            # 3. If message is a general query, always use SearchService (ChatGPT-like web search)
-            elif search_service:
+            # 3. If message is a general query (not a command, not a URL, and not a recognized intent), use web search
+            elif (intent_type != 'command' or not intent) and not found_urls and search_service:
                 try:
                     result = None
                     references = None
