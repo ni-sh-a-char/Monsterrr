@@ -914,7 +914,14 @@ async def status_command(ctx):
             recent_msgs.extend([m["content"] for m in conversation_memory[uid] if m.get("role") == "user"])
     recent_msgs = recent_msgs[-3:] if recent_msgs else []
 
-    # Org-wide health indicators
+    # Org context
+    import os
+    github_org = os.getenv("GITHUB_ORG", "unknown")
+    # Enforce org restriction: only operate for the configured org
+    allowed_org = os.getenv("GITHUB_ORG", "unknown")
+    if github_org != allowed_org:
+        await ctx.send(f"This bot is restricted to operate only for the organization specified in the .env file. Current org: {github_org}")
+        return
     pr_count = state.get("pull_requests", {}).get("count", 0)
     pr_age = state.get("pull_requests", {}).get("avg_age_days", "N/A")
     issue_count = state.get("issues", {}).get("count", 0)
@@ -952,6 +959,7 @@ async def status_command(ctx):
         f"- Memory usage: {mem_usage}",
         f"- Hostname / IP: {hostname} / {ip}",
         f"- Model in use: {GROQ_MODEL}",
+        f"- Managing GitHub organization: {github_org}",
         f"- Recent user activity:"
     ]
     if recent_msgs:
@@ -961,7 +969,7 @@ async def status_command(ctx):
         status_lines.append("    • No recent user activity.")
     status_lines.extend([
         f"- Org-wide health indicators:",
-        f"    • Repository count: {len(repos)} active repos under the organization",
+        f"    • Repository count: {len(repos)} active repos under the organization '{github_org}'",
         f"    • Pending pull-requests: {pr_count} (average age {pr_age} days)",
         f"    • Open issues: {issue_count} (critical {issue_crit}, high {issue_high}, medium {issue_med}, low {issue_low})",
         f"    • CI pipeline health: {ci_status}; average duration {ci_duration}",
