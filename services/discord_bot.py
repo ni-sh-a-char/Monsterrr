@@ -569,27 +569,53 @@ async def on_message(message: discord.Message):
 
     try:
         async with message.channel.typing():
+            import re
+            url_pattern = re.compile(r"https?://\S+", re.IGNORECASE)
+            found_urls = url_pattern.findall(content)
+            # If message is a command, handle as before
             if intent_type == 'command' and intent:
                 reply = await handle_natural_command(intent, content, user_id)
                 conversation_memory[user_id].append({"role": "assistant", "content": reply})
-                # Try to send as embed if possible
                 try:
                     embed = create_professional_embed("Monsterrr Command Result", reply)
                     await message.channel.send(embed=embed)
                 except Exception:
                     await send_long_message(message.channel, reply)
-            else:
-                ai_reply = await asyncio.to_thread(_call_groq, prompt, GROQ_MODEL)
-                if not ai_reply:
-                    await send_long_message(message.channel, "Sorry, I couldn't generate a response.")
-                    return
-                conversation_memory[user_id].append({"role": "assistant", "content": ai_reply})
-                # Try to send as embed if possible
+            # If message contains a URL, summarize it using SearchService
+            elif found_urls and search_service:
+                url = found_urls[0]
                 try:
-                    embed = create_professional_embed("Monsterrr", ai_reply)
+                    summary = await asyncio.to_thread(search_service.summarize_url, url)
+                except Exception as e:
+                    summary = f"Sorry, I couldn't summarize the URL: {e}"
+                conversation_memory[user_id].append({"role": "assistant", "content": summary})
+                try:
+                    embed = create_professional_embed("Monsterrr Web Summary", summary)
                     await message.channel.send(embed=embed)
                 except Exception:
-                    await send_long_message(message.channel, ai_reply)
+                    await send_long_message(message.channel, summary)
+            # If message is a general query, use SearchService for web search
+            elif search_service:
+                try:
+                    web_answer = await asyncio.to_thread(search_service.search, content)
+                except Exception as e:
+                    web_answer = None
+                if web_answer:
+                    answer = web_answer
+                else:
+                    # fallback to LLM if web search fails
+                    ai_reply = await asyncio.to_thread(_call_groq, prompt, GROQ_MODEL)
+                    if not ai_reply:
+                        await send_long_message(message.channel, "Sorry, I couldn't generate a response.")
+                        return
+                    org = os.getenv("GITHUB_ORG", "unknown")
+                    answer = re.sub(r"(?i)the GitHub organization I manage( is called| is|:)? [^\n.]+", f"the GitHub organization I manage is called {org}", ai_reply)
+                conversation_memory[user_id].append({"role": "assistant", "content": answer})
+                try:
+                    embed = create_professional_embed("Monsterrr", answer)
+                    await message.channel.send(embed=embed)
+                except Exception:
+                    await send_long_message(message.channel, answer)
     except Exception as e:
         logger.exception("AI reply failed: %s", e)
         try:
