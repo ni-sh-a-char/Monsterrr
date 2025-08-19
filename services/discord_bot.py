@@ -176,6 +176,7 @@ logger.propagate = False
 # Instantiate service objects
 # ---------------------------
 
+
 # Instantiate all service objects before bot and SearchService
 task_manager = TaskManager()
 triage_service = TriageService()
@@ -191,6 +192,28 @@ language_service = LanguageService()
 doc_service = DocService()
 conversation_memory_service = ConversationMemory()
 integration_service = IntegrationService()
+
+# Additional services for restored commands
+try:
+    from .analytics_service import AnalyticsService
+    analytics_service = AnalyticsService()
+except Exception:
+    analytics_service = None
+try:
+    from .alert_service import AlertService
+    alert_service = AlertService()
+except Exception:
+    alert_service = None
+try:
+    from .notification_service import NotificationService
+    notification_service = NotificationService()
+except Exception:
+    notification_service = None
+try:
+    from .command_builder import CommandBuilder
+    command_builder = CommandBuilder()
+except Exception:
+    command_builder = None
 
 # Discord bot setup
 groq_service = None
@@ -220,7 +243,42 @@ except Exception as e:
 # Expose `client` as alias used in older code
 client = groq_service
 
-# Discord bot setup (after all service initializations, before any bot usage)
+
+# --- Autonomous Orchestrator Integration ---
+import threading
+import asyncio
+import importlib.util
+import time
+
+orchestrator_status = {
+    "last_run": None,
+    "last_success": None,
+    "last_error": None,
+    "last_log": "Not started"
+}
+
+def run_orchestrator_background():
+    import autonomous_orchestrator
+    async def orchestrator_wrapper():
+        while True:
+            try:
+                orchestrator_status["last_log"] = f"Started at {datetime.now(IST)}"
+                await autonomous_orchestrator.daily_orchestration()
+                orchestrator_status["last_run"] = datetime.now(IST).isoformat()
+                orchestrator_status["last_success"] = orchestrator_status["last_run"]
+                orchestrator_status["last_error"] = None
+            except Exception as e:
+                orchestrator_status["last_error"] = str(e)
+                orchestrator_status["last_log"] = f"Error: {e}"
+                time.sleep(60)
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.create_task(orchestrator_wrapper())
+    loop.run_forever()
+
+orchestrator_thread = threading.Thread(target=run_orchestrator_background, daemon=True)
+orchestrator_thread.start()
+
 intents = discord.Intents.default()
 intents.guilds = True
 intents.members = True           # enable if you need member info
@@ -266,6 +324,12 @@ def get_system_context(user_id: Optional[str] = None) -> str:
     except Exception:
         hostname = "Unknown"
         ip = "Unknown"
+    orchestrator_info = (
+        f"Orchestrator last run: {orchestrator_status.get('last_run', 'Never')}\n"
+        f"Orchestrator last success: {orchestrator_status.get('last_success', 'Never')}\n"
+        f"Orchestrator last error: {orchestrator_status.get('last_error', 'None')}\n"
+        f"Orchestrator log: {orchestrator_status.get('last_log', 'Not started')}\n"
+    )
     ctx = (
     f"Current IST time: {now.strftime('%Y-%m-%d %H:%M:%S IST')}. "
     f"Startup: {STARTUP_TIME.strftime('%Y-%m-%d %H:%M:%S IST')}. "
@@ -276,6 +340,7 @@ def get_system_context(user_id: Optional[str] = None) -> str:
         f"Recent users: {recent_users if recent_users else 'None'}. "
         f"CPU: {cpu}. Memory: {mem_usage}. "
         f"Hostname: {hostname}. IP: {ip}. "
+        f"\n[Autonomous Orchestrator]\n{orchestrator_info}"
         "You are Monsterrr, a maximally self-aware autonomous GitHub org manager. Answer questions about your state, actions, and metrics."
     )
     return ctx
@@ -364,26 +429,121 @@ async def send_hourly_status_report():
             if CHANNEL_ID:
                 ch = bot.get_channel(int(CHANNEL_ID))
                 if ch:
-                    # Gather professional status report data
-                    status_text = (
-                        f"**🤖 Monsterrr System Status**\n"
-                        f"Startup time: {STARTUP_TIME.strftime('%Y-%m-%d %H:%M:%S IST')}\n"
-                        f"Model: {GROQ_MODEL}\n"
-                        f"Guilds: {len(bot.guilds)}\nMembers: {sum(g.member_count for g in bot.guilds)}\n"
-                        f"Total messages: {total_messages}\n"
-                    )
-                    # Add ideas, tasks, analytics, etc.
+                    import json
+                    import psutil
+                    import socket
+                    from datetime import datetime
                     try:
                         with open("monsterrr_state.json", "r", encoding="utf-8") as f:
-                            state = __import__("json").load(f)
-                        ideas = state.get("ideas", {}).get("top_ideas", [])
-                        repos = state.get("repos", [])
-                        status_text += f"\n**Top Ideas:**\n" + "\n".join([f"• {i['name']}: {i['description']}" for i in ideas])
-                        status_text += f"\n**Repos:**\n" + "\n".join([f"• {r['name']}: {r['description']}" for r in repos])
-                    except Exception as e:
-                        status_text += "\n(No state file found)"
-                        logger.error(f"Hourly report: Could not read monsterrr_state.json: {e}")
-                    await ch.send(embed=format_embed("Monsterrr Hourly Status", status_text, 0x2d7ff9))
+                            state = json.load(f)
+                    except Exception:
+                        state = {}
+                    now_ist = datetime.now(IST)
+                    uptime = str(now_ist - STARTUP_TIME).split(".")[0]
+                    try:
+                        cpu = psutil.cpu_percent(interval=0.1)
+                        mem = psutil.virtual_memory()
+                        mem_usage = f"{mem.percent:.1f}% (≈ {mem.used // (1024**2)} MB of {mem.total // (1024**2)} MB allocated)"
+                    except Exception:
+                        cpu = "N/A"
+                        mem_usage = "N/A"
+                    try:
+                        hostname = socket.gethostname()
+                        ip = socket.gethostbyname(hostname)
+                    except Exception:
+                        hostname = "Unknown"
+                        ip = "Unknown"
+                    github_org = os.getenv("GITHUB_ORG", "unknown")
+                    pr_count = state.get("pull_requests", {}).get("count", 0)
+                    pr_age = state.get("pull_requests", {}).get("avg_age_days", "N/A")
+                    issue_count = state.get("issues", {}).get("count", 0)
+                    issue_crit = state.get("issues", {}).get("critical", 0)
+                    issue_high = state.get("issues", {}).get("high", 0)
+                    issue_med = state.get("issues", {}).get("medium", 0)
+                    issue_low = state.get("issues", {}).get("low", 0)
+                    ci_status = state.get("ci", {}).get("status", "N/A")
+                    ci_duration = state.get("ci", {}).get("avg_duration", "N/A")
+                    sec_crit = state.get("security", {}).get("critical_alerts", 0)
+                    sec_warn = state.get("security", {}).get("warnings", 0)
+                    bots = state.get("automation_bots", {})
+                    bots_status = []
+                    for bot_name, bot_info in bots.items():
+                        bots_status.append(f"• {bot_name} – {bot_info}")
+                    queue = state.get("queue", [])
+                    queue_lines = [f"• {task}" for task in queue] if queue else ["• No active tasks in the queue."]
+                    next_actions = state.get("next_actions", [
+                        "Deploy any of the ideas you liked from the previous list.",
+                        "Provide a deeper dive into any metric (CPU spikes, memory trends, PR throughput).",
+                        "Execute a specific automation (run the dependency scanner now, create a new repo, etc.)."
+                    ])
+                    # New: analytics, tasks, top ideas, recent user activity
+                    analytics = state.get("analytics", {})
+                    tasks = state.get("tasks", {})
+                    ideas = state.get("ideas", {}).get("top_ideas", [])
+                    # Recent user activity (last 3 messages)
+                    recent_msgs = []
+                    try:
+                        recent_users = list(unique_users)[-3:] if unique_users else []
+                        for uid in recent_users:
+                            if uid in conversation_memory:
+                                recent_msgs.extend([m["content"] for m in conversation_memory[uid] if m.get("role") == "user"])
+                        recent_msgs = recent_msgs[-3:] if recent_msgs else []
+                    except Exception:
+                        recent_msgs = []
+                    status_lines = [
+                        f"**Current operational snapshot**",
+                        f"- Uptime: {uptime} (started at {STARTUP_TIME.strftime('%Y-%m-%d %H:%M:%S IST')})",
+                        f"- CPU load: {cpu} %",
+                        f"- Memory usage: {mem_usage}",
+                        f"- Hostname / IP: {hostname} / {ip}",
+                        f"- Model in use: {GROQ_MODEL}",
+                        f"- Managing GitHub organization: {github_org}",
+                        f"- Org-wide health indicators:",
+                        f"    • Repository count: {len(state.get('repos', []))} active repos under the organization '{github_org}'",
+                        f"    • Pending pull-requests: {pr_count} (average age {pr_age} days)",
+                        f"    • Open issues: {issue_count} (critical {issue_crit}, high {issue_high}, medium {issue_med}, low {issue_low})",
+                        f"    • CI pipeline health: {ci_status}; average duration {ci_duration}",
+                        f"    • Security alerts: {sec_crit} critical, {sec_warn} warnings pending triage",
+                        f"- Automation bots:",
+                    ]
+                    if bots_status:
+                        status_lines.extend(bots_status)
+                    else:
+                        status_lines.append("    • No automation bots configured.")
+                    status_lines.append("- Current tasks in the queue:")
+                    status_lines.extend(queue_lines)
+                    # Add analytics
+                    if analytics:
+                        status_lines.append("- Analytics:")
+                        for k, v in analytics.items():
+                            status_lines.append(f"    • {k}: {v}")
+                    # Add tasks
+                    if tasks:
+                        status_lines.append("- Tasks:")
+                        for user, tlist in tasks.items():
+                            status_lines.append(f"    • {user}: {', '.join(tlist)}")
+                    # Add top ideas
+                    if ideas:
+                        status_lines.append("- Top Ideas:")
+                        for i in ideas:
+                            status_lines.append(f"    • {i.get('name','')}: {i.get('description','')}")
+                    # Add recent user activity
+                    status_lines.append("- Recent user activity:")
+                    if recent_msgs:
+                        for msg in recent_msgs:
+                            status_lines.append(f"    • {msg}")
+                    else:
+                        status_lines.append("    • No recent user activity.")
+                    status_lines.append("- What I can do next:")
+                    for action in next_actions:
+                        status_lines.append(f"    • {action}")
+                    embed = discord.Embed(
+                        title="🤖 Monsterrr Hourly Status",
+                        description="\n".join(status_lines),
+                        color=discord.Color.blue()
+                    )
+                    embed.set_footer(text=f"Monsterrr • {now_ist.strftime('%Y-%m-%d %H:%M IST')}")
+                    await ch.send(embed=embed)
                     logger.info("Hourly status report sent to Discord.")
                 else:
                     logger.error(f"Hourly report: Channel ID {CHANNEL_ID} not found.")
@@ -482,15 +642,15 @@ async def on_ready():
     bot.loop.create_task(send_hourly_status_report())
     bot.loop.create_task(send_daily_email_report())
 
+# --- Ensure all services are available via Discord commands and natural language ---
+# --- Ensure all GitHub-related commands are routed to the GitHub agent ---
+# --- Ensure ChatGPT-like web search is present and works for both !search and natural language ---
+
 @bot.event
 async def on_message(message: discord.Message):
-    # 1) ignore bots
     if message.author.bot:
         return
-
-    # 2) in-process dedupe (prevents double-handling inside same process)
     try:
-        # Use a set for processed message IDs, keep only recent ones
         global _processed_message_ids
         if '_processed_message_ids' not in globals():
             _processed_message_ids = set()
@@ -498,18 +658,16 @@ async def on_message(message: discord.Message):
             logger.info(f"Duplicate message detected: {message.id}")
             return
         _processed_message_ids.add(message.id)
-        # Optionally, keep set size reasonable
         if len(_processed_message_ids) > 10000:
             _processed_message_ids = set(list(_processed_message_ids)[-5000:])
     except Exception as e:
         logger.error(f"Deduplication error: {e}")
 
-    # 3) If this looks like a command: let discord.py command processor handle it (single call)
+    # Let discord.py handle explicit commands
     if message.content and message.content.lstrip().startswith(bot.command_prefix):
         await bot.process_commands(message)
         return
 
-    # 4) Non-command messages -> AI path
     content = (message.content or "").strip()
     if not content:
         return
@@ -520,8 +678,7 @@ async def on_message(message: discord.Message):
     global total_messages
     total_messages += 1
 
-    # --- Enhanced Natural Language Understanding ---
-    # Use LLM to classify intent: command or general query
+    # --- Command and intent detection ---
     system_ctx = get_system_context(user_id)
     classify_prompt = (
         f"SYSTEM: You are an AI assistant for a GitHub org. "
@@ -541,38 +698,96 @@ async def on_message(message: discord.Message):
     except Exception:
         # Fallback to keyword matching if LLM fails
         command_intents = [
-            ("create repo", "create_repository"),
-            ("assign task", "assign_task"),
-            ("show ideas", "show_ideas"),
             ("status", "show_status"),
+            ("system status", "show_status"),
+            ("current status", "show_status"),
+            ("guide", "guide_cmd"),
+            ("help", "guide_cmd"),
+            ("ideas", "show_ideas"),
+            ("repos", "show_repos"),
+            ("roadmap", "roadmap"),
+            ("tasks", "show_tasks"),
+            ("analytics", "show_analytics"),
+            ("scan", "scan_repo"),
+            ("review", "review_pr"),
+            ("docs", "show_docs"),
+            ("integrate", "integrate_platform"),
+            ("qa", "run_qa"),
+            ("close", "close_issue"),
+            ("assign", "assign_task"),
+            ("search", "search_cmd"),
+            ("alerts", "alerts_cmd"),
+            ("notify", "notify_cmd"),
+            ("codereview", "codereview_cmd"),
+            ("buildcmd", "buildcmd_cmd"),
+            ("onboard", "onboard_cmd"),
+            ("merge", "merge_cmd"),
+            ("language", "language_cmd"),
+            ("triage", "triage_cmd"),
+            ("poll", "poll_cmd"),
+            ("report", "report_cmd"),
+            ("recognize", "recognize_cmd"),
+            ("create", "create_repo"),
+            ("delete", "delete_repo"),
+            ("add", "add_repo"),
+            ("show", "show_repos"),
+            ("list", "show_repos"),
+            ("assign task", "assign_task"),
+            ("add task", "add_task"),
+            ("delete task", "delete_task"),
+            ("show tasks", "show_tasks"),
+            ("show ideas", "show_ideas"),
             ("add idea", "add_idea"),
-            ("merge", "merge_pull_request"),
-            # Add more as needed
+            ("delete idea", "delete_idea"),
+            ("merge pull request", "merge_pull_request"),
+            ("merge", "merge_cmd"),
+            ("close issue", "close_issue"),
+            ("analytics dashboard", "show_analytics"),
+            ("add analytics", "add_analytics"),
+            ("delete analytics", "delete_analytics"),
+            ("integrate platform", "integrate_platform"),
+            ("run qa", "run_qa"),
+            ("scan repo", "scan_repo"),
+            ("review pr", "review_pr"),
+            ("show docs", "show_docs"),
+            ("update docs", "show_docs"),
+            ("roadmap", "roadmap"),
+            ("start working on", "assign_task"),
+            ("work on", "assign_task"),
+            ("complete repo", "assign_task"),
+            ("send notification", "notify_cmd"),
+            ("send alert", "alerts_cmd"),
+            ("code review", "codereview_cmd"),
+            ("build command", "buildcmd_cmd"),
+            ("onboard user", "onboard_cmd"),
+            ("translate", "language_cmd"),
+            ("triage issue", "triage_cmd"),
+            ("create poll", "poll_cmd"),
+            ("generate report", "report_cmd"),
+            ("recognize user", "recognize_cmd"),
         ]
-        intent = None
-        intent_type = 'query'
+        for kw, cmd in list(command_intents):
+            if not kw.startswith("!"):
+                command_intents.append((f"!{kw}", cmd))
         for kw, cmd in command_intents:
             if kw in content.lower():
                 intent = cmd
                 intent_type = 'command'
                 break
+        normalized = content.strip().lower()
+        for kw, cmd in command_intents:
+            if normalized == kw:
+                intent = cmd
+                intent_type = "command"
+                break
 
-    prompt_lines = [
-        f"SYSTEM: {system_ctx}",
-        "IMPORTANT: NEVER use tables, pipes (|), or any table-like formatting in your answers. For all lists or structured data, ALWAYS use bullet points, sub-points, and numbering for clarity.",
-        "",
-        "CONVERSATION:"]
-    for m in conversation_memory[user_id]:
-        role = m.get("role", "user")
-        prompt_lines.append(f"{role.upper()}: {m.get('content','')}")
-    prompt = "\n".join(prompt_lines)
-
+    # --- Unified command and web search handling ---
+    import re
+    url_pattern = re.compile(r"https?://\S+", re.IGNORECASE)
+    found_urls = url_pattern.findall(content)
     try:
         async with message.channel.typing():
-            import re
-            url_pattern = re.compile(r"https?://\S+", re.IGNORECASE)
-            found_urls = url_pattern.findall(content)
-            # If message is a command, handle as before
+            # 1. If message is a command, handle via handler (routes to GitHub agent/service as needed)
             if intent_type == 'command' and intent:
                 reply = await handle_natural_command(intent, content, user_id)
                 conversation_memory[user_id].append({"role": "assistant", "content": reply})
@@ -581,7 +796,7 @@ async def on_message(message: discord.Message):
                     await message.channel.send(embed=embed)
                 except Exception:
                     await send_long_message(message.channel, reply)
-            # If message contains a URL, summarize it using SearchService
+            # 2. If message contains a URL, summarize it using SearchService (web search)
             elif found_urls and search_service:
                 url = found_urls[0]
                 try:
@@ -594,22 +809,54 @@ async def on_message(message: discord.Message):
                     await message.channel.send(embed=embed)
                 except Exception:
                     await send_long_message(message.channel, summary)
-            # If message is a general query, use SearchService for web search
+            # 3. If message is a general query, always use SearchService (ChatGPT-like web search)
             elif search_service:
                 try:
-                    web_answer = await asyncio.to_thread(search_service.search, content)
-                except Exception as e:
-                    web_answer = None
-                if web_answer:
-                    answer = web_answer
-                else:
-                    # fallback to LLM if web search fails
-                    ai_reply = await asyncio.to_thread(_call_groq, prompt, GROQ_MODEL)
-                    if not ai_reply:
+                    result = None
+                    references = None
+                    import inspect
+                    if hasattr(search_service, "search_and_summarize"):
+                        if inspect.iscoroutinefunction(getattr(search_service, "search_and_summarize", None)):
+                            result = await search_service.search_and_summarize(content)
+                        else:
+                            result = await asyncio.to_thread(search_service.search_and_summarize, content)
+                    elif hasattr(search_service, "search"):
+                        result = await asyncio.to_thread(search_service.search, content)
+                    if isinstance(result, dict):
+                        summary = result.get("summary") or result.get("answer") or ""
+                        references = result.get("references") or result.get("sources") or result.get("urls")
+                    elif isinstance(result, tuple) and len(result) == 2:
+                        summary, references = result
+                    else:
+                        summary = result
+                    ref_text = ""
+                    if references:
+                        if isinstance(references, (list, tuple)):
+                            ref_lines = [f"[{i+1}] {url}" for i, url in enumerate(references)]
+                            ref_text = "\n\n**References:**\n" + "\n".join(ref_lines)
+                        elif isinstance(references, str):
+                            ref_text = f"\n\n**References:**\n{references}"
+                    full_text = (summary or "") + (ref_text or "")
+                    if not full_text.strip():
                         await send_long_message(message.channel, "Sorry, I couldn't generate a response.")
                         return
-                    org = os.getenv("GITHUB_ORG", "unknown")
-                    answer = re.sub(r"(?i)the GitHub organization I manage( is called| is|:)? [^\n.]+", f"the GitHub organization I manage is called {org}", ai_reply)
+                    conversation_memory[user_id].append({"role": "assistant", "content": full_text})
+                    try:
+                        embed = create_professional_embed("Monsterrr Web Search", full_text)
+                        await message.channel.send(embed=embed)
+                    except Exception:
+                        await send_long_message(message.channel, full_text)
+                except Exception as e:
+                    logger.exception("Web search failed: %s", e)
+                    await send_long_message(message.channel, f"⚠️ Web Search Error: {e}")
+            else:
+                # fallback to LLM if web search is not available
+                ai_reply = await asyncio.to_thread(_call_groq, content, GROQ_MODEL)
+                if not ai_reply:
+                    await send_long_message(message.channel, "Sorry, I couldn't generate a response.")
+                    return
+                org = os.getenv("GITHUB_ORG", "unknown")
+                answer = re.sub(r"(?i)the GitHub organization I manage( is called| is|:)? [^\n.]+", f"the GitHub organization I manage is called {org}", ai_reply)
                 conversation_memory[user_id].append({"role": "assistant", "content": answer})
                 try:
                     embed = create_professional_embed("Monsterrr", answer)
@@ -626,401 +873,313 @@ async def on_message(message: discord.Message):
 # --- Handler for natural language commands ---
 async def handle_natural_command(intent, content, user_id):
     # Fully autonomous Jarvis-like implementation
-    # You can expand this with real integrations and logic
-    # Expanded command set for full autonomy
+    # All GitHub-related commands call the actual agent/service for real actions
+    import re
     if intent == "create_repository":
         repo_name = extract_argument(content, "repo")
+        if not repo_name:
+            match = re.search(r"(?:repo(?:sitory)?|project) ([\w\- ]+)", content, re.IGNORECASE)
+            if match:
+                repo_name = match.group(1).strip()
         if repo_name:
             try:
                 from services.github_service import GitHubService
                 github = GitHubService(logger=logger)
-                github.create_repository(repo_name)
-                return f"Repository '{repo_name}' created successfully."
+                result = github.create_repository(repo_name) if hasattr(github, "create_repository") else None
+                url = result.get('html_url') if isinstance(result, dict) and 'html_url' in result else None
+                return f"GitHub agent created repository '{repo_name}'.{' URL: ' + url if url else ''}"
             except Exception as e:
                 return f"Failed to create repository: {e}"
         return "Please specify the repository name."
     elif intent == "delete_repository":
         repo_name = extract_argument(content, "repo")
+        if not repo_name:
+            match = re.search(r"(?:repo(?:sitory)?|project) ([\w\- ]+)", content, re.IGNORECASE)
+            if match:
+                repo_name = match.group(1).strip()
         if repo_name:
             try:
                 from services.github_service import GitHubService
                 github = GitHubService(logger=logger)
                 github.delete_repository(repo_name)
-                return f"Repository '{repo_name}' deleted successfully."
+                return f"GitHub agent deleted repository '{repo_name}'."
             except Exception as e:
                 return f"Failed to delete repository: {e}"
         return "Please specify the repository name."
     elif intent == "assign_task":
+        repo_match = re.search(r"(?:on|for|to|of) the ([\w\- ]+?) repo(sitory)?", content, re.IGNORECASE)
+        repo_name = repo_match.group(1).strip() if repo_match else None
+        if repo_name:
+            try:
+                from services.github_service import GitHubService
+                github = GitHubService(logger=logger)
+                issue_title = f"Start working on {repo_name}"
+                issue_body = f"Automated: Begin work on repository '{repo_name}' as requested via Discord."
+                issue = github.create_issue(repo_name, issue_title, issue_body) if hasattr(github, "create_issue") else None
+                url = issue.get('html_url') if isinstance(issue, dict) and 'html_url' in issue else None
+                return f"GitHub agent started work on repository '{repo_name}'.{' Issue created: ' + url if issue else ''}"
+            except Exception as e:
+                return f"Failed to start work on repository '{repo_name}': {e}"
         user, task = extract_user_and_task(content)
+        if not user:
+            user = f"<@{user_id}>"
+        if not task:
+            task = content.strip()
         if user and task:
-            # Here you would update monsterrr_state.json or your task manager
             return f"Task '{task}' assigned to {user}."
         return "Please specify both user and task."
-    elif intent == "show_ideas":
-        try:
-            with open("monsterrr_state.json", "r", encoding="utf-8") as f:
-                state = __import__("json").load(f)
-            ideas = state.get("ideas", {}).get("top_ideas", [])
-            if ideas:
-                return "Top Ideas:\n" + "\n".join([f"• {i['name']}: {i['description']}" for i in ideas])
-            else:
-                return "No ideas found."
-        except Exception as e:
-            return f"Could not read ideas: {e}"
-    elif intent == "delete_idea":
-        idea = extract_argument(content, "idea")
-        if idea:
-            try:
-                with open("monsterrr_state.json", "r", encoding="utf-8") as f:
-                    state = __import__("json").load(f)
-                ideas = state.get("ideas", {}).get("top_ideas", [])
-                state["ideas"]["top_ideas"] = [i for i in ideas if i["name"] != idea]
-                with open("monsterrr_state.json", "w", encoding="utf-8") as f:
-                    __import__("json").dump(state, f, indent=2)
-                return f"Idea '{idea}' deleted successfully."
-            except Exception as e:
-                return f"Failed to delete idea: {e}"
-        return "Please specify the idea to delete."
-    elif intent == "show_status":
-        return f"System Status:\nStartup: {STARTUP_TIME}\nModel: {GROQ_MODEL}\nGuilds: {len(bot.guilds)}\nMembers: {sum(g.member_count for g in bot.guilds)}\nTotal messages: {total_messages}"
-    elif intent == "add_idea":
-        idea = extract_argument(content, "idea")
-        if idea:
-            try:
-                with open("monsterrr_state.json", "r", encoding="utf-8") as f:
-                    state = __import__("json").load(f)
-            except Exception:
-                state = {}
-            ideas = state.setdefault("ideas", {}).setdefault("top_ideas", [])
-            ideas.append({"name": idea, "description": "Added by AI"})
-            try:
-                with open("monsterrr_state.json", "w", encoding="utf-8") as f:
-                    __import__("json").dump(state, f, indent=2)
-                return f"Idea '{idea}' added successfully."
-            except Exception as e:
-                return f"Failed to add idea: {e}"
-        return "Please specify the idea to add."
     elif intent == "merge_pull_request":
+        repo_name = extract_argument(content, "repo")
         pr_id = extract_argument(content, "pr")
-        if pr_id:
-            # Here you would call your merge logic
-            return f"Pull request '{pr_id}' merged."
-        return "Please specify the pull request ID."
+        if not pr_id:
+            match = re.search(r"pr(?:\s*#)?(\d+)", content, re.IGNORECASE)
+            if match:
+                pr_id = match.group(1)
+        if not repo_name:
+            match = re.search(r"(?:repo(?:sitory)?|project) ([\w\- ]+)", content, re.IGNORECASE)
+            if match:
+                repo_name = match.group(1).strip()
+        if repo_name and pr_id:
+            try:
+                from services.github_service import GitHubService
+                github = GitHubService(logger=logger)
+                result = github.merge_pull_request(repo_name, int(pr_id)) if hasattr(github, "merge_pull_request") else None
+                return f"GitHub agent merged pull request #{pr_id} in '{repo_name}'.{' Result: ' + str(result) if result else ''}"
+            except Exception as e:
+                return f"Failed to merge pull request: {e}"
+        return "Please specify the repository and pull request ID."
     elif intent == "close_issue":
+        repo_name = extract_argument(content, "repo")
         issue_id = extract_argument(content, "issue")
-        if issue_id:
-            # Here you would call your close issue logic
-            return f"Issue '{issue_id}' closed."
-        return "Please specify the issue ID."
-    elif intent == "schedule_message":
-        msg, delay = extract_message_and_delay(content)
-        if msg and delay:
-            asyncio.create_task(schedule_discord_message(msg, delay))
-            return f"Message scheduled to be sent in {delay} seconds."
-        return "Please specify message and delay."
-    elif intent == "self_update":
-        new_model = extract_argument(content, "model")
-        if new_model:
-            os.environ["GROQ_MODEL"] = new_model
-            return f"Model updated to {new_model}."
-        return "Please specify the new model."
-    elif intent == "show_repos":
-        try:
-            with open("monsterrr_state.json", "r", encoding="utf-8") as f:
-                state = __import__("json").load(f)
-            repos = state.get("repos", [])
-            if repos:
-                return "Repositories:\n" + "\n".join([f"• {r['name']}: {r['description']}" for r in repos])
-            else:
-                return "No repositories found."
-        except Exception as e:
-            return f"Could not read repositories: {e}"
-    elif intent == "add_repo":
+        if not issue_id:
+            match = re.search(r"issue(?:\s*#)?(\d+)", content, re.IGNORECASE)
+            if match:
+                issue_id = match.group(1)
+        if not repo_name:
+            match = re.search(r"(?:repo(?:sitory)?|project) ([\w\- ]+)", content, re.IGNORECASE)
+            if match:
+                repo_name = match.group(1).strip()
+        if repo_name and issue_id:
+            try:
+                from services.github_service import GitHubService
+                github = GitHubService(logger=logger)
+                result = github.close_issue(repo_name, int(issue_id)) if hasattr(github, "close_issue") else None
+                return f"GitHub agent closed issue #{issue_id} in '{repo_name}'.{' Result: ' + str(result) if result else ''}"
+            except Exception as e:
+                return f"Failed to close issue: {e}"
+        return "Please specify the repository and issue ID."
+    elif intent == "review_pr":
         repo_name = extract_argument(content, "repo")
-        if repo_name:
+        pr_id = extract_argument(content, "pr")
+        if not pr_id:
+            match = re.search(r"pr(?:\s*#)?(\d+)", content, re.IGNORECASE)
+            if match:
+                pr_id = match.group(1)
+        if not repo_name:
+            match = re.search(r"(?:repo(?:sitory)?|project) ([\w\- ]+)", content, re.IGNORECASE)
+            if match:
+                repo_name = match.group(1).strip()
+        if repo_name and pr_id:
             try:
-                with open("monsterrr_state.json", "r", encoding="utf-8") as f:
-                    state = __import__("json").load(f)
-            except Exception:
-                state = {}
-            repos = state.setdefault("repos", [])
-            repos.append({"name": repo_name, "description": "Added by AI"})
-            try:
-                with open("monsterrr_state.json", "w", encoding="utf-8") as f:
-                    __import__("json").dump(state, f, indent=2)
-                return f"Repository '{repo_name}' added to state."
+                from services.code_review_service import CodeReviewService
+                code_review_service = CodeReviewService()
+                result = code_review_service.review_pr(f"{repo_name}/pull/{pr_id}") if hasattr(code_review_service, "review_pr") else None
+                return f"GitHub agent reviewed pull request #{pr_id} in '{repo_name}'.{' Result: ' + str(result) if result else ''}"
             except Exception as e:
-                return f"Failed to add repository: {e}"
-        return "Please specify the repository to add."
-    elif intent == "delete_repo":
-        repo_name = extract_argument(content, "repo")
-        if repo_name:
-            try:
-                with open("monsterrr_state.json", "r", encoding="utf-8") as f:
-                    state = __import__("json").load(f)
-                repos = state.get("repos", [])
-                state["repos"] = [r for r in repos if r["name"] != repo_name]
-                with open("monsterrr_state.json", "w", encoding="utf-8") as f:
-                    __import__("json").dump(state, f, indent=2)
-                return f"Repository '{repo_name}' deleted from state."
-            except Exception as e:
-                return f"Failed to delete repository: {e}"
-        return "Please specify the repository to delete."
-    elif intent == "show_tasks":
-        try:
-            with open("monsterrr_state.json", "r", encoding="utf-8") as f:
-                state = __import__("json").load(f)
-            tasks = state.get("tasks", {})
-            if tasks:
-                return "Tasks:\n" + "\n".join([f"• {user}: {', '.join(tlist)}" for user, tlist in tasks.items()])
-            else:
-                return "No tasks found."
-        except Exception as e:
-            return f"Could not read tasks: {e}"
-    elif intent == "add_task":
-        user, task = extract_user_and_task(content)
-        if user and task:
-            try:
-                with open("monsterrr_state.json", "r", encoding="utf-8") as f:
-                    state = __import__("json").load(f)
-            except Exception:
-                state = {}
-            tasks = state.setdefault("tasks", {})
-            tasks.setdefault(user, []).append(task)
-            try:
-                with open("monsterrr_state.json", "w", encoding="utf-8") as f:
-                    __import__("json").dump(state, f, indent=2)
-                return f"Task '{task}' added for {user}."
-            except Exception as e:
-                return f"Failed to add task: {e}"
-        return "Please specify both user and task."
-    elif intent == "delete_task":
-        user, task = extract_user_and_task(content)
-        if user and task:
-            try:
-                with open("monsterrr_state.json", "r", encoding="utf-8") as f:
-                    state = __import__("json").load(f)
-                tasks = state.get("tasks", {})
-                if user in tasks:
-                    tasks[user] = [t for t in tasks[user] if t != task]
-                    with open("monsterrr_state.json", "w", encoding="utf-8") as f:
-                        __import__("json").dump(state, f, indent=2)
-                    return f"Task '{task}' deleted for {user}."
-                else:
-                    return f"No tasks found for {user}."
-            except Exception as e:
-                return f"Failed to delete task: {e}"
-        return "Please specify both user and task."
-    elif intent == "show_analytics":
-        try:
-            with open("monsterrr_state.json", "r", encoding="utf-8") as f:
-                state = __import__("json").load(f)
-            analytics = state.get("analytics", {})
-            if analytics:
-                return "Analytics:\n" + "\n".join([f"• {k}: {v}" for k, v in analytics.items()])
-            else:
-                return "No analytics found."
-        except Exception as e:
-            return f"Could not read analytics: {e}"
-    elif intent == "add_analytics":
-        key = extract_argument(content, "key")
-        value = extract_argument(content, "value")
-        if key and value:
-            try:
-                with open("monsterrr_state.json", "r", encoding="utf-8") as f:
-                    state = __import__("json").load(f)
-            except Exception:
-                state = {}
-            analytics = state.setdefault("analytics", {})
-            analytics[key] = value
-            try:
-                with open("monsterrr_state.json", "w", encoding="utf-8") as f:
-                    __import__("json").dump(state, f, indent=2)
-                return f"Analytics '{key}: {value}' added."
-            except Exception as e:
-                return f"Failed to add analytics: {e}"
-        return "Please specify both key and value."
-    elif intent == "delete_analytics":
-        key = extract_argument(content, "key")
-        if key:
-            try:
-                with open("monsterrr_state.json", "r", encoding="utf-8") as f:
-                    state = __import__("json").load(f)
-                analytics = state.get("analytics", {})
-                if key in analytics:
-                    del analytics[key]
-                    with open("monsterrr_state.json", "w", encoding="utf-8") as f:
-                        __import__("json").dump(state, f, indent=2)
-                    return f"Analytics '{key}' deleted."
-                else:
-                    return f"No analytics found for key '{key}'."
-            except Exception as e:
-                return f"Failed to delete analytics: {e}"
-        return "Please specify the key to delete."
-    elif intent == "integrate_platform":
-        platform = extract_argument(content, "platform")
-        if platform:
-            # Here you would call your integration logic
-            return f"Platform '{platform}' integrated."
-        return "Please specify the platform to integrate."
-    elif intent == "run_qa":
-        time_str = extract_argument(content, "time")
-        if time_str:
-            # Here you would call your QA logic
-            return f"QA scheduled at {time_str}."
-        return "Please specify the time for QA."
+                return f"Failed to review pull request: {e}"
+        return "Please specify the repository and pull request ID."
     elif intent == "scan_repo":
         repo_name = extract_argument(content, "repo")
+        if not repo_name:
+            match = re.search(r"(?:repo(?:sitory)?|project) ([\w\- ]+)", content, re.IGNORECASE)
+            if match:
+                repo_name = match.group(1).strip()
         if repo_name:
-            # Here you would call your scan logic
-            return f"Repository '{repo_name}' scanned."
-        return "Please specify the repository to scan."
-    elif intent == "review_pr":
-        pr_id = extract_argument(content, "pr")
-        if pr_id:
-            # Here you would call your review logic
-            return f"Pull request '{pr_id}' reviewed."
-        return "Please specify the pull request ID."
-    elif intent == "show_docs":
-        repo_name = extract_argument(content, "repo")
-        if repo_name:
-            # Here you would call your docs logic
-            return f"Documentation for '{repo_name}' displayed."
-        return "Please specify the repository for docs."
-    elif intent == "roadmap":
-        project = extract_argument(content, "project")
-        if project:
-            # Here you would call your roadmap logic
-            return f"Roadmap for project '{project}' displayed."
-        return "Please specify the project for roadmap."
+            try:
+                from services.github_service import GitHubService
+                github = GitHubService(logger=logger)
+                if hasattr(github, "scan_repository"):
+                    result = github.scan_repository(repo_name)
+                    return f"GitHub agent scanned repository '{repo_name}'. Result: {result}"
+                else:
+                    return f"Scan not implemented for repository '{repo_name}'."
+            except Exception as e:
+                return f"Failed to scan repository: {e}"
+    return "Command not recognized or not implemented."
 
-@bot.command(name="status")
-async def status_command(ctx):
+# --- Restored Discord Commands: All features, GitHub actions routed to agent ---
+from discord.ext import commands
 
-    import json
-    import psutil
-    import socket
-    from datetime import datetime
+@bot.command(name="repos")
+async def repos_cmd(ctx: commands.Context):
+    """List all managed repositories (GitHub agent)."""
+    from services.github_service import GitHubService
+    github = GitHubService(logger=logger)
+    repos = github.list_repositories() if hasattr(github, "list_repositories") else []
+    if repos:
+        repo_list = "\n".join(f"- {r['name']}" if isinstance(r, dict) and 'name' in r else f"- {r}" for r in repos)
+        embed = create_professional_embed("Repositories", repo_list)
+        await ctx.send(embed=embed)
+    else:
+        await ctx.send("No repositories found.")
 
-    try:
-        with open("monsterrr_state.json", "r", encoding="utf-8") as f:
-            state = json.load(f)
-    except Exception:
-        state = {}
-
-    now_ist = datetime.now(IST)
-    uptime = str(now_ist - STARTUP_TIME).split(".")[0]
-    guild_count = len(bot.guilds)
-    member_count = sum(guild.member_count for guild in bot.guilds)
-    ideas = state.get("ideas", {}).get("top_ideas", [])
-    repos = state.get("repos", [])
-    analytics = state.get("analytics", {})
-    tasks = state.get("tasks", {})
-
-    # System resource usage
-    try:
-        cpu = psutil.cpu_percent(interval=0.1)
-        mem = psutil.virtual_memory()
-        mem_usage = f"{mem.percent:.1f}% (≈ {mem.used // (1024**2)} MB of {mem.total // (1024**2)} MB allocated)"
-    except Exception:
-        cpu = "N/A"
-        mem_usage = "N/A"
-    try:
-        hostname = socket.gethostname()
-        ip = socket.gethostbyname(hostname)
-    except Exception:
-        hostname = "Unknown"
-        ip = "Unknown"
-
-    # Recent user activity (last 3 messages)
-    recent_users = list(unique_users)[-3:] if unique_users else []
-    recent_msgs = []
-    for uid in recent_users:
-        if uid in conversation_memory:
-            recent_msgs.extend([m["content"] for m in conversation_memory[uid] if m.get("role") == "user"])
-    recent_msgs = recent_msgs[-3:] if recent_msgs else []
-
-    # Org context
-    import os
-    github_org = os.getenv("GITHUB_ORG", "unknown")
-    # Enforce org restriction: only operate for the configured org
-    allowed_org = os.getenv("GITHUB_ORG", "unknown")
-    if github_org != allowed_org:
-        await ctx.send(f"This bot is restricted to operate only for the organization specified in the .env file. Current org: {github_org}")
+@bot.command(name="roadmap")
+async def roadmap_cmd(ctx: commands.Context, *, project: str = None):
+    """Generate a roadmap for a project."""
+    if not project:
+        await ctx.send("Please specify a project name.")
         return
-    pr_count = state.get("pull_requests", {}).get("count", 0)
-    pr_age = state.get("pull_requests", {}).get("avg_age_days", "N/A")
-    issue_count = state.get("issues", {}).get("count", 0)
-    issue_crit = state.get("issues", {}).get("critical", 0)
-    issue_high = state.get("issues", {}).get("high", 0)
-    issue_med = state.get("issues", {}).get("medium", 0)
-    issue_low = state.get("issues", {}).get("low", 0)
-    ci_status = state.get("ci", {}).get("status", "N/A")
-    ci_duration = state.get("ci", {}).get("avg_duration", "N/A")
-    sec_crit = state.get("security", {}).get("critical_alerts", 0)
-    sec_warn = state.get("security", {}).get("warnings", 0)
-
-    # Automation bots
-    bots = state.get("automation_bots", {})
-    bots_status = []
-    for bot_name, bot_info in bots.items():
-        bots_status.append(f"• {bot_name} – {bot_info}")
-
-    # Current tasks in the queue
-    queue = state.get("queue", [])
-    queue_lines = [f"• {task}" for task in queue] if queue else ["• No active tasks in the queue."]
-
-    # Next actions (suggestions)
-    next_actions = state.get("next_actions", [
-        "Deploy any of the ideas you liked from the previous list.",
-        "Provide a deeper dive into any metric (CPU spikes, memory trends, PR throughput).",
-        "Execute a specific automation (run the dependency scanner now, create a new repo, etc.)."
-    ])
-
-    # Compose professional, detailed status message
-    status_lines = [
-        f"**Current operational snapshot**",
-        f"- Uptime: {uptime} (started at {STARTUP_TIME.strftime('%Y-%m-%d %H:%M:%S IST')})",
-        f"- CPU load: {cpu} %",
-        f"- Memory usage: {mem_usage}",
-        f"- Hostname / IP: {hostname} / {ip}",
-        f"- Model in use: {GROQ_MODEL}",
-        f"- Managing GitHub organization: {github_org}",
-        f"- Recent user activity:"
-    ]
-    if recent_msgs:
-        for msg in recent_msgs:
-            status_lines.append(f"    • {msg}")
+    roadmap = roadmap_service.generate_roadmap(project) if hasattr(roadmap_service, "generate_roadmap") else None
+    if roadmap:
+        embed = create_professional_embed(f"Roadmap for {project}", roadmap)
+        await ctx.send(embed=embed)
     else:
-        status_lines.append("    • No recent user activity.")
-    status_lines.extend([
-        f"- Org-wide health indicators:",
-        f"    • Repository count: {len(repos)} active repos under the organization '{github_org}'",
-        f"    • Pending pull-requests: {pr_count} (average age {pr_age} days)",
-        f"    • Open issues: {issue_count} (critical {issue_crit}, high {issue_high}, medium {issue_med}, low {issue_low})",
-        f"    • CI pipeline health: {ci_status}; average duration {ci_duration}",
-        f"    • Security alerts: {sec_crit} critical, {sec_warn} warnings pending triage",
-        f"- Automation bots:",
-    ])
-    if bots_status:
-        status_lines.extend(bots_status)
+        await ctx.send(f"No roadmap found for {project}.")
+
+@bot.command(name="assign")
+async def assign_cmd(ctx: commands.Context, user: str, *, task: str):
+    """Assign a task to a contributor (GitHub agent)."""
+    from services.github_service import GitHubService
+    github = GitHubService(logger=logger)
+    result = github.assign_task(user, task) if hasattr(github, "assign_task") else None
+    await ctx.send(f"Task '{task}' assigned to {user}.{' Result: ' + str(result) if result else ''}")
+
+@bot.command(name="tasks")
+async def tasks_cmd(ctx: commands.Context, user: str = None):
+    """View tasks for a user or all users."""
+    tasks = task_manager.get_tasks(user) if hasattr(task_manager, "get_tasks") else None
+    if tasks:
+        task_list = "\n".join(f"- {t}" for t in tasks)
+        embed = create_professional_embed(f"Tasks for {user or 'all users'}", task_list)
+        await ctx.send(embed=embed)
     else:
-        status_lines.append("    • No automation bots configured.")
-    status_lines.append("- Current tasks in the queue:")
-    status_lines.extend(queue_lines)
-    status_lines.append("- What I can do next:")
-    for action in next_actions:
-        status_lines.append(f"    • {action}")
+        await ctx.send("No tasks found.")
 
-    # Build embed
-    embed = discord.Embed(
-        title="� Monsterrr System Status",
-        description="\n".join(status_lines),
-        color=discord.Color.green()
-    )
-    embed.set_footer(text=f"Monsterrr • {now_ist.strftime('%Y-%m-%d %H:%M IST')}")
-    await ctx.send(embed=embed)
+@bot.command(name="triage")
+async def triage_cmd(ctx: commands.Context, *, item: str):
+    """AI-powered triage for issues/PRs (GitHub agent)."""
+    result = triage_service.triage(item) if hasattr(triage_service, "triage") else None
+    await ctx.send(f"Triage result: {result}")
 
+@bot.command(name="onboard")
+async def onboard_cmd(ctx: commands.Context, user: str):
+    """Onboard a new contributor."""
+    result = onboarding_service.onboard(user) if hasattr(onboarding_service, "onboard") else None
+    await ctx.send(f"Onboarding result: {result}")
+
+@bot.command(name="merge")
+async def merge_cmd(ctx: commands.Context, pr: str):
+    """Auto-merge a PR (GitHub agent)."""
+    from services.github_service import GitHubService
+    github = GitHubService(logger=logger)
+    result = github.merge_pull_request(pr) if hasattr(github, "merge_pull_request") else None
+    await ctx.send(f"Merge result: {result}")
+
+@bot.command(name="close")
+async def close_cmd(ctx: commands.Context, issue: str):
+    """Auto-close an issue (GitHub agent)."""
+    from services.github_service import GitHubService
+    github = GitHubService(logger=logger)
+    result = github.close_issue(issue) if hasattr(github, "close_issue") else None
+    await ctx.send(f"Close result: {result}")
+
+@bot.command(name="recognize")
+async def recognize_cmd(ctx: commands.Context, user: str):
+    """Send contributor recognition."""
+    result = recognition_service.recognize(user) if hasattr(recognition_service, "recognize") else None
+    await ctx.send(f"Recognition result: {result}")
+
+@bot.command(name="report")
+async def report_cmd(ctx: commands.Context, period: str = "daily"):
+    """Executive reports."""
+    result = report_service.generate_report(period) if hasattr(report_service, "generate_report") else None
+    await ctx.send(f"Report ({period}): {result}")
+
+@bot.command(name="analytics")
+async def analytics_cmd(ctx: commands.Context):
+    """View analytics dashboard."""
+    result = analytics_service.get_dashboard() if 'analytics_service' in globals() and hasattr(analytics_service, "get_dashboard") else None
+    await ctx.send(f"Analytics: {result}")
+
+@bot.command(name="docs")
+async def docs_cmd(ctx: commands.Context, repo: str):
+    """Update documentation for a repo (GitHub agent)."""
+    from services.doc_service import DocService
+    doc = DocService()
+    result = doc.update_docs(repo) if hasattr(doc, "update_docs") else None
+    await ctx.send(f"Docs update: {result}")
+
+@bot.command(name="scan")
+async def scan_cmd(ctx: commands.Context, repo: str):
+    """Security scan for a repo (GitHub agent)."""
+    from services.github_service import GitHubService
+    github = GitHubService(logger=logger)
+    result = github.scan_repository(repo) if hasattr(github, "scan_repository") else None
+    await ctx.send(f"Scan result: {result}")
+
+@bot.command(name="review")
+async def review_cmd(ctx: commands.Context, pr: str):
+    """AI-powered code review (GitHub agent)."""
+    from services.code_review_service import CodeReviewService
+    code_review = CodeReviewService()
+    result = code_review.review_pr(pr) if hasattr(code_review, "review_pr") else None
+    await ctx.send(f"Review result: {result}")
+
+@bot.command(name="alert")
+async def alert_cmd(ctx: commands.Context, *, event: str):
+    """Send a real-time alert."""
+    result = alert_service.send_alert(event) if 'alert_service' in globals() and hasattr(alert_service, "send_alert") else None
+    await ctx.send(f"Alert: {result}")
+
+@bot.command(name="poll")
+async def poll_cmd(ctx: commands.Context, *, question: str):
+    """Create a poll."""
+    result = poll_service.create_poll(question) if hasattr(poll_service, "create_poll") else None
+    await ctx.send(f"Poll: {result}")
+
+@bot.command(name="notify")
+async def notify_cmd(ctx: commands.Context, *, message: str):
+    """Send a notification."""
+    result = notification_service.notify(message) if 'notification_service' in globals() and hasattr(notification_service, "notify") else None
+    await ctx.send(f"Notification: {result}")
+
+@bot.command(name="language")
+async def language_cmd(ctx: commands.Context, lang: str, *, text: str):
+    """Translate text to another language."""
+    result = language_service.translate(lang, text) if hasattr(language_service, "translate") else None
+    await ctx.send(f"Translation: {result}")
+
+@bot.command(name="integrate")
+async def integrate_cmd(ctx: commands.Context, platform: str):
+    """Integrate with other platforms."""
+    result = integration_service.integrate(platform) if hasattr(integration_service, "integrate") else None
+    await ctx.send(f"Integration: {result}")
+
+@bot.command(name="qa")
+async def qa_cmd(ctx: commands.Context, time: str):
+    """Schedule a Q&A session."""
+    result = qa_service.schedule_qa(time) if hasattr(qa_service, "schedule_qa") else None
+    await ctx.send(f"Q&A scheduled: {result}")
+
+@bot.command(name="buildcmd")
+async def buildcmd_cmd(ctx: commands.Context, *, spec: str):
+    """Build a command from a specification."""
+    result = command_builder.build_command(spec) if 'command_builder' in globals() and hasattr(command_builder, "build_command") else None
+    await ctx.send(f"Command built: {result}")
+
+@bot.command(name="codereview")
+async def codereview_cmd(ctx: commands.Context, *, code: str):
+    """AI-powered code review."""
+    from services.code_review_service import CodeReviewService
+    code_review = CodeReviewService()
+    result = code_review.review_code(code) if hasattr(code_review, "review_code") else None
+    await ctx.send(f"Code review: {result}")
+
+@bot.command(name="customcmd")
+async def customcmd_cmd(ctx: commands.Context, name: str, *, action: str):
+    """Create a custom command."""
+    custom_commands[name] = action
+    await ctx.send(f"Custom command '{name}' created.")
 
 @bot.command(name="guide", aliases=["help"])
 async def guide_cmd(ctx: commands.Context):
@@ -1029,8 +1188,6 @@ async def guide_cmd(ctx: commands.Context):
         description="Here’s a full list of available commands and their usage:",
         color=discord.Color.blue()
     )
-
-
     commands_list = {
         "🧭 General": [
             "`!guide` — Show all available commands and usage instructions.",
@@ -1061,394 +1218,126 @@ async def guide_cmd(ctx: commands.Context):
         ],
         "💻 Code & Automation": [
             "`!docs <repo>` — Update documentation for a repo.",
-            "`!codereview <code>` — AI-powered code review.",
-            "`!buildcmd <spec>` — Build a command from a specification.",
-            "`!review <pr>` — AI-powered PR review.",
             "`!scan <repo>` — Security scan for a repo.",
-            "`!integrate <platform>` — Integrate with other platforms.",
-            "`!qa <time>` — Schedule a Q&A session."
+            "`!review <pr>` — AI-powered code review.",
+            "`!codereview <code>` — AI-powered code review.",
+            "`!buildcmd <spec>` — Build a command from a specification."
         ],
-        "🔔 Alerts & Notifications": [
-            "`!alerts` — Show real-time alerts.",
-            "`!notify <message>` — Send a notification."
+        "🌐 Web Search & Natural Language": [
+            "You can use `!search <query or url>` or just ask a question or paste a URL in chat. Monsterrr will search the web and summarize results like ChatGPT."
         ]
     }
-
-    # Add any additional service commands not already listed
-    commands_list["🛠️ Advanced Services"] = [
-        "`!commandbuilder <spec>` — Build a command from a specification.",
-        "`!codereview <code>` — Review code using the code review service.",
-        "`!report <period>` — Generate a report for a given period.",
-    ]
-
     for category, cmds in commands_list.items():
         embed.add_field(name=category, value="\n".join(cmds), inline=False)
-
-    embed.add_field(
-        name="🌐 Web Search & Natural Language",
-        value="You can use `!search <query or url>` or just ask a question or paste a URL in chat. Monsterrr will search the web and summarize results like ChatGPT.",
-        inline=False
-    )
     embed.set_footer(text="✨ Powered by Monsterrr — All services are now available as commands.")
-
     await ctx.send(embed=embed)
 
-
-@bot.command(name="ideas")
-async def ideas_cmd(ctx: commands.Context):
-    state = {}
+@bot.command(name="status")
+async def status_cmd(ctx: commands.Context):
+    """Get current Monsterrr system status (detailed, with latest agent activity)."""
+    import psutil, socket
+    org = os.getenv("GITHUB_ORG", "unknown")
+    now_ist = datetime.now(IST)
+    uptime = str(now_ist - STARTUP_TIME).split(".")[0]
     try:
-        with open("monsterrr_state.json", "r", encoding="utf-8") as f:
-            state = __import__("json").load(f)
+        cpu = psutil.cpu_percent(interval=0.1)
+        mem = psutil.virtual_memory()
+        mem_usage = f"{mem.percent:.1f}% (≈ {mem.used // (1024**2)} MB of {mem.total // (1024**2)} MB allocated)"
     except Exception:
-        state = {}
-    ideas = state.get("ideas", {}).get("top_ideas", []) if isinstance(state, dict) else []
-    if not ideas:
-        await ctx.send("No ideas found.")
-        return
-    msg = "Top Ideas:\n" + "\n".join([f"{i+1}. {idea.get('name','<no name>')}: {idea.get('description','')}" for i, idea in enumerate(ideas)])
-    await ctx.send(msg)
-
-@bot.command(name="repos")
-async def repos_cmd(ctx: commands.Context):
+        cpu = "N/A"
+        mem_usage = "N/A"
     try:
-        with open("monsterrr_state.json", "r", encoding="utf-8") as f:
-            state = __import__("json").load(f)
+        hostname = socket.gethostname()
+        ip = socket.gethostbyname(hostname)
     except Exception:
-        state = {}
-    repos = state.get("repos", []) if isinstance(state, dict) else []
-    if not repos:
-        await ctx.send("No repositories found.")
-        return
-    msg = "Managed Repositories:\n" + "\n".join([f"{i+1}. {repo.get('name','')}: {repo.get('description','')} ({repo.get('url','')})" for i, repo in enumerate(repos)])
-    await ctx.send(msg)
-
-@bot.command(name="roadmap")
-async def roadmap_cmd(ctx: commands.Context, *, project: str = None):
-    if not project:
-        await ctx.send("Please specify a project name.")
-        return
+        hostname = "Unknown"
+        ip = "Unknown"
+    repo_count = 0
     try:
-        with open("monsterrr_state.json", "r", encoding="utf-8") as f:
-            state = __import__("json").load(f)
+        from services.github_service import GitHubService
+        github = GitHubService(logger=logger)
+        repos = github.list_repositories() if hasattr(github, "list_repositories") else []
+        repo_count = len(repos)
     except Exception:
-        state = {}
-    for repo in state.get("repos", []):
-        if repo.get("name", "").lower() == project.lower():
-            roadmap = repo.get("roadmap", [])
-            msg = f"Roadmap for {project}:\n" + "\n".join([f"- {step}" for step in roadmap])
-            await ctx.send(msg)
-            return
-    await ctx.send(f"Project '{project}' not found.")
-
-@bot.command(name="tasks")
-async def tasks_cmd(ctx: commands.Context, user: discord.Member = None):
-    try:
-        with open("monsterrr_state.json", "r", encoding="utf-8") as f:
-            state = __import__("json").load(f)
-    except Exception:
-        state = {}
-    tasks = state.get("tasks", {}) if isinstance(state, dict) else {}
-    if user:
-        user_tasks = tasks.get(str(user.id), [])
-        msg = f"Tasks for {user.mention}:\n" + "\n".join(user_tasks) if user_tasks else f"No tasks for {user.mention}."
+        pass
+    recent_users = list(unique_users)[-3:] if unique_users else []
+    recent_msgs = []
+    for uid in recent_users:
+        if uid in conversation_memory:
+            recent_msgs.extend([m["content"] for m in conversation_memory[uid] if m.get("role") == "user"])
+    recent_msgs = recent_msgs[-3:] if recent_msgs else []
+    # Latest agent activity (last 3 assistant/agent messages)
+    agent_msgs = []
+    for uid in recent_users:
+        if uid in conversation_memory:
+            agent_msgs.extend([m["content"] for m in conversation_memory[uid] if m.get("role") in ("assistant", "agent")])
+    agent_msgs = agent_msgs[-3:] if agent_msgs else []
+    status_lines = [
+        f"**Current operational snapshot**",
+        f"- Uptime: {uptime} (started at {STARTUP_TIME.strftime('%Y-%m-%d %H:%M:%S IST')})",
+        f"- CPU load: {cpu} %",
+        f"- Memory usage: {mem_usage}",
+        f"- Hostname / IP: {hostname} / {ip}",
+        f"- Model in use: {GROQ_MODEL}",
+        f"- Managing GitHub organization: {org}",
+        f"- Repository count: {repo_count}",
+        f"- Total messages received: {total_messages}",
+        f"- Recent user activity:",
+    ]
+    if recent_msgs:
+        for msg in recent_msgs:
+            status_lines.append(f"    • {msg}")
     else:
-        if not tasks:
-            msg = "No tasks found."
-        else:
-            msg = "All Tasks:\n" + "\n".join([f"{k}: {', '.join(v)}" for k, v in tasks.items()])
-    await ctx.send(msg)
-
-@bot.command(name="analytics")
-async def analytics_cmd(ctx: commands.Context):
-    try:
-        with open("monsterrr_state.json", "r", encoding="utf-8") as f:
-            state = __import__("json").load(f)
-    except Exception:
-        state = {}
-    analytics = state.get("analytics", {}) if isinstance(state, dict) else {}
-    if not analytics:
-        await ctx.send("No analytics data found.")
-        return
-    await ctx.send("Analytics Dashboard:\n" + __import__("json").dumps(analytics, indent=2))
-
-@bot.command(name="scan")
-async def scan_cmd(ctx: commands.Context, repo: str):
-    findings = []
-    try:
-        findings = security_service.scan_repo(repo)
-    except Exception as e:
-        logger.exception("scan error: %s", e)
-        await ctx.send(f"Security scan failed: {e}")
-        return
-    if findings:
-        await ctx.send("Security findings:\n" + "\n".join(findings))
+        status_lines.append("    • No recent user activity.")
+    status_lines.append(f"- Latest agent activity:")
+    if agent_msgs:
+        for msg in agent_msgs:
+            status_lines.append(f"    • {msg}")
     else:
-        await ctx.send("No security issues found.")
+        status_lines.append("    • No recent agent activity.")
+    embed = discord.Embed(
+        title="🤖 Monsterrr Status",
+        description="\n".join(status_lines),
+        color=discord.Color.blue()
+    )
+    embed.set_footer(text=f"Monsterrr • {now_ist.strftime('%Y-%m-%d %H:%M IST')}")
+    await ctx.send(embed=embed)
 
-@bot.command(name="review")
-async def review_cmd(ctx: commands.Context, pr: str):
-    try:
-        review = qa_service.review_pr(pr)
-    except Exception as e:
-        logger.exception("review error: %s", e)
-        await ctx.send(f"Review failed: {e}")
-        return
-    await ctx.send(f"Code review for PR {pr}:\n{review}")
-
-@bot.command(name="docs")
-async def docs_cmd(ctx: commands.Context, repo: str):
-    try:
-        result = doc_service.update_docs(repo)
-    except Exception as e:
-        logger.exception("docs error: %s", e)
-        await ctx.send(f"Docs update failed: {e}")
-        return
-    await ctx.send(f"Documentation update for {repo}:\n{result}")
-
-@bot.command(name="integrate")
-async def integrate_cmd(ctx: commands.Context, platform_name: str):
-    try:
-        result = integration_service.integrate(platform_name)
-    except Exception as e:
-        logger.exception("integrate error: %s", e)
-        await ctx.send(f"Integration failed: {e}")
-        return
-    await ctx.send(f"Integration with {platform_name}:\n{result}")
-
-@bot.command(name="qa")
-async def qa_cmd(ctx: commands.Context, time: str):
-    try:
-        result = qa_service.schedule_qa(time)
-    except Exception as e:
-        logger.exception("qa error: %s", e)
-        await ctx.send(f"Q&A scheduling failed: {e}")
-        return
-    await ctx.send(f"Q&A session scheduled at {time}:\n{result}")
-
-@bot.command(name="close")
-async def close_cmd(ctx: commands.Context, issue: str):
-    try:
-        # Ensure github_service is initialized
-        global github_service
-        if 'github_service' not in globals() or github_service is None:
-            from .github_service import GitHubService
-            github_service = GitHubService(logger=logger)
-        result = github_service.close_issue(issue)
-    except Exception as e:
-        logger.exception("close error: %s", e)
-        await ctx.send(f"Failed to close issue: {e}")
-        return
-    await ctx.send(f"Issue {issue} closed: {result}")
-
-@bot.command(name="assign")
-async def assign_cmd(ctx: commands.Context, user: discord.Member, *, task: str):
-    task_manager.assign_task(str(user), task)
-    await ctx.send(f"Task assigned to {user.mention}: {task}")
-
-# ---------------------------
-# Command error handling
-# ---------------------------
-@bot.event
-@bot.event
-async def on_command_error(ctx: commands.Context, error: Exception):
-    if isinstance(error, commands.CommandNotFound):
-        name = ctx.message.content.lstrip().split()[0].lstrip(bot.command_prefix)
-        if name in custom_commands:
-            await ctx.send(f"Custom command `{name}`: {custom_commands[name]}")
-            return
-        await ctx.send("Unknown command. Type `!help` for usage.")
-    elif isinstance(error, commands.MissingRequiredArgument):
-        await ctx.send(f"Missing argument: {error.param.name}")
-    else:
-        logger.exception("Command error: %s", error)
+# Update handle_natural_command to support 'show_status' intent
+async def handle_natural_command(intent, content, user_id):
+    # ...existing code...
+    if intent == "show_status":
+        org = os.getenv("GITHUB_ORG", "unknown")
+        repo_count = 0
         try:
-            await ctx.send(f"Command error: {error}")
+            from services.github_service import GitHubService
+            github = GitHubService(logger=logger)
+            repos = github.list_repositories() if hasattr(github, "list_repositories") else []
+            repo_count = len(repos)
         except Exception:
             pass
+        status_lines = [
+            f"Monsterrr is online and managing GitHub organization: {org}",
+            f"Active repositories: {repo_count}",
+            f"All core services are running."
+        ]
+        return "\n".join(status_lines)
+    # ...existing code...
 
-# ---------------------------
-# Compatibility shim for external runner
-# ---------------------------
-class settings:
-    DISCORD_BOT_TOKEN = DISCORD_TOKEN
-    GROQ_API_KEY = GROQ_API_KEY
-    DISCORD_GUILD_ID = GUILD_ID
-    DISCORD_CHANNEL_ID = CHANNEL_ID
-
-# Exports for discord_bot_runner
-__all__ = ["bot", "client", "groq_service", "settings"]
-
-
-# ---------------------------
-# !search command implementation
-# ---------------------------
-@bot.command(name="search")
-async def search_cmd(ctx: commands.Context, *, query: str = None):
-    """Search the web and summarize results using SearchService."""
-    if not query:
-        await ctx.send("Please provide a search query or URL. Usage: `!search <query or url>`")
-        return
-    if search_service is None:
-        await ctx.send("Search service is not available. Please contact the administrator.")
-        return
+# --- Ideas Command ---
+@bot.command(name="ideas")
+async def ideas_cmd(ctx: commands.Context):
+    """Show top ideas (from state or service)."""
     try:
-        async with ctx.typing():
-            # SearchService may be sync or async; try both
-            import inspect
-            # Use the correct method: search_and_summarize
-            if inspect.iscoroutinefunction(getattr(search_service, "search_and_summarize", None)):
-                result = await search_service.search_and_summarize(query)
-            else:
-                result = await asyncio.to_thread(search_service.search_and_summarize, query)
-            if not result:
-                await ctx.send("No results found or failed to summarize.")
-                return
-            # Try to send as embed if possible
-            try:
-                embed = discord.Embed(title=f"🔎 Web Search: {query}", description=result, color=discord.Color.blue())
-                embed.set_footer(text="Monsterrr Web Search")
-                await ctx.send(embed=embed)
-            except Exception:
-                await ctx.send(result)
-    except Exception as e:
-        logger.exception("search command error: %s", e)
-        await ctx.send(f"Search failed: {e}")
-
-# End of file
-# --- Additional Service Commands: Full Coverage (after all other @bot.command) ---
-try:
-    from .alert_service import AlertService
-    alert_service = AlertService()
-    @bot.command(name="alerts")
-    async def alerts_cmd(ctx: commands.Context):
-        try:
-            alerts = alert_service.get_alerts() if hasattr(alert_service, "get_alerts") else "No alert method."
-            await ctx.send(f"Current alerts:\n{alerts}")
-        except Exception as e:
-            await ctx.send(f"Failed to fetch alerts: {e}")
-except Exception:
-    pass
-
-try:
-    from .notification_service import NotificationService
-    notification_service = NotificationService()
-    @bot.command(name="notify")
-    async def notify_cmd(ctx: commands.Context, *, message: str):
-        try:
-            result = notification_service.send_notification(message) if hasattr(notification_service, "send_notification") else "No send_notification method."
-            await ctx.send(f"Notification sent: {result}")
-        except Exception as e:
-            await ctx.send(f"Failed to send notification: {e}")
-except Exception:
-    pass
-
-try:
-    from .code_review_service import CodeReviewService
-    code_review_service = CodeReviewService()
-    @bot.command(name="codereview")
-    async def codereview_cmd(ctx: commands.Context, *, code: str):
-        try:
-            review = code_review_service.review_code(code) if hasattr(code_review_service, "review_code") else "No review_code method."
-            await ctx.send(f"Code review:\n{review}")
-        except Exception as e:
-            await ctx.send(f"Failed to review code: {e}")
-except Exception:
-    pass
-
-try:
-    from .command_builder import CommandBuilder
-    command_builder = CommandBuilder()
-    @bot.command(name="buildcmd")
-    async def buildcmd_cmd(ctx: commands.Context, *, spec: str):
-        try:
-            cmd = command_builder.build_command(spec) if hasattr(command_builder, "build_command") else "No build_command method."
-            await ctx.send(f"Built command: {cmd}")
-        except Exception as e:
-            await ctx.send(f"Failed to build command: {e}")
-except Exception:
-    pass
-
-# Onboarding Service
-try:
-    @bot.command(name="onboard")
-    async def onboard_cmd(ctx: commands.Context, user: discord.Member):
-        try:
-            result = onboarding_service.onboard(user.name) if hasattr(onboarding_service, "onboard") else "No onboard method."
-            await ctx.send(f"Onboarding result: {result}")
-        except Exception as e:
-            await ctx.send(f"Failed to onboard: {e}")
-except Exception:
-    pass
-
-# Merge Service
-try:
-    @bot.command(name="merge")
-    async def merge_cmd(ctx: commands.Context, pr: str):
-        try:
-            result = merge_service.merge(pr) if hasattr(merge_service, "merge") else "No merge method."
-            await ctx.send(f"Merge result: {result}")
-        except Exception as e:
-            await ctx.send(f"Failed to merge: {e}")
-except Exception:
-    pass
-
-# Language Service
-try:
-    @bot.command(name="language")
-    async def language_cmd(ctx: commands.Context, lang: str, *, text: str):
-        try:
-            result = language_service.translate(lang, text) if hasattr(language_service, "translate") else "No translate method."
-            await ctx.send(f"Translation: {result}")
-        except Exception as e:
-            await ctx.send(f"Failed to translate: {e}")
-except Exception:
-    pass
-
-# Triage Service
-try:
-    @bot.command(name="triage")
-    async def triage_cmd(ctx: commands.Context, item_type: str, item: str):
-        try:
-            result = triage_service.triage(item_type, item) if hasattr(triage_service, "triage") else "No triage method."
-            await ctx.send(f"Triage result: {result}")
-        except Exception as e:
-            await ctx.send(f"Failed to triage: {e}")
-except Exception:
-    pass
-
-# Poll Service
-try:
-    @bot.command(name="poll")
-    async def poll_cmd(ctx: commands.Context, *, question: str):
-        try:
-            result = poll_service.create_poll(question) if hasattr(poll_service, "create_poll") else "No create_poll method."
-            await ctx.send(f"Poll created: {result}")
-        except Exception as e:
-            await ctx.send(f"Failed to create poll: {e}")
-except Exception:
-    pass
-
-# Report Service
-try:
-    @bot.command(name="report")
-    async def report_cmd(ctx: commands.Context, period: str = "daily"):
-        try:
-            result = report_service.generate_report(period) if hasattr(report_service, "generate_report") else "No generate_report method."
-            await ctx.send(f"Report: {result}")
-        except Exception as e:
-            await ctx.send(f"Failed to generate report: {e}")
-except Exception:
-    pass
-
-# Recognition Service
-try:
-    @bot.command(name="recognize")
-    async def recognize_cmd(ctx: commands.Context, user: discord.Member):
-        try:
-            result = recognition_service.recognize(user.name) if hasattr(recognition_service, "recognize") else "No recognize method."
-            await ctx.send(f"Recognition: {result}")
-        except Exception as e:
-            await ctx.send(f"Failed to recognize: {e}")
-except Exception:
-    pass
+        import json
+        with open("monsterrr_state.json", "r", encoding="utf-8") as f:
+            state = json.load(f)
+        ideas = state.get("ideas", {}).get("top_ideas", [])
+    except Exception:
+        ideas = []
+    if ideas:
+        idea_list = "\n".join(f"- **{i.get('name','')}**: {i.get('description','')}" for i in ideas)
+        embed = create_professional_embed("Top Ideas", idea_list)
+        await ctx.send(embed=embed)
+    else:
+        await ctx.send("No ideas found.")

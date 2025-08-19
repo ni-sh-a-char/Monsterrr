@@ -25,10 +25,11 @@ class MaintainerAgent:
         Use Groq LLM to plan exactly `num_contributions` meaningful contributions for today.
         Contributions can be repo creation or feature branch (with AI-generated name).
         Saves plan to logs/daily_plan_<date>.json.
+        Deletes previous daily_plan_*.json files to avoid storage accumulation.
         Returns parsed plan (list of dicts).
         """
         from datetime import datetime
-        import json, os
+        import json, os, glob
         repos = self.github_service.list_repositories()
         repo_metadata = [
             {"name": r["name"], "description": r.get("description", ""), "topics": r.get("topics", [])}
@@ -69,9 +70,15 @@ class MaintainerAgent:
         date_str = datetime.now(IST).strftime("%Y-%m-%d")
         save_path = f"logs/daily_plan_{date_str}.json"
         try:
-            import os
-            import json
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            # Delete previous daily_plan_*.json files except today's
+            for old_file in glob.glob("logs/daily_plan_*.json"):
+                if old_file != save_path:
+                    try:
+                        os.remove(old_file)
+                        self.logger.info(f"[MaintainerAgent] Deleted old plan file: {old_file}")
+                    except Exception as e:
+                        self.logger.warning(f"[MaintainerAgent] Could not delete {old_file}: {e}")
             with open(save_path, "w", encoding="utf-8") as f:
                 json.dump(plan, f, indent=2)
             self.logger.info(f"[MaintainerAgent] Saved daily plan to {save_path}")
