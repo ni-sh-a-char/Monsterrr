@@ -1370,36 +1370,36 @@ async def search_cmd(ctx, *, query: str):
     if not search_service:
         await ctx.send("Web search is not available.")
         return
-    await ctx.trigger_typing()
-    try:
-        result = await search_service.search_and_summarize(query)
-        summary = None
-        references = None
-        if isinstance(result, dict):
-            summary = result.get("summary") or result.get("answer") or ""
-            references = result.get("references") or result.get("sources") or result.get("urls")
-        elif isinstance(result, tuple) and len(result) == 2:
-            summary, references = result
-        else:
-            summary = str(result)
-        if not summary or "summarization failed" in summary.lower():
-            await ctx.send("Search succeeded, but summarization failed. Please try a different query or check the LLM configuration.")
-            return
-        ref_text = ""
-        if references:
-            if isinstance(references, (list, tuple)):
-                ref_lines = [f"[{i+1}] {url}" for i, url in enumerate(references)]
-                ref_text = "\n\n**References:**\n" + "\n".join(ref_lines)
-            elif isinstance(references, str):
-                ref_text = f"\n\n**References:**\n{references}"
-        full_text = (summary or "") + (ref_text or "")
-        embed = create_professional_embed("Monsterrr Web Search", full_text)
-        await ctx.send(embed=embed)
-        # Sync search result to shared state for agent-bot sync
-        update_shared_state("search", {"query": query, "summary": summary, "references": references, "timestamp": datetime.now(IST).isoformat()})
-    except Exception as e:
-        logger.exception("Web search failed: %s", e)
-        await ctx.send(f"⚠️ Web Search Error: {e}")
+    async with ctx.typing():
+        try:
+            result = await search_service.search_and_summarize(query)
+            summary = None
+            references = None
+            if isinstance(result, dict):
+                summary = result.get("summary") or result.get("answer") or ""
+                references = result.get("references") or result.get("sources") or result.get("urls")
+            elif isinstance(result, tuple) and len(result) == 2:
+                summary, references = result
+            else:
+                summary = str(result)
+            if not summary or "summarization failed" in summary.lower():
+                await ctx.send("Search succeeded, but summarization failed. Please try a different query or check the LLM configuration.")
+                return
+            ref_text = ""
+            if references:
+                if isinstance(references, (list, tuple)):
+                    ref_lines = [f"[{i+1}] {url}" for i, url in enumerate(references)]
+                    ref_text = "\n\n**References:**\n" + "\n".join(ref_lines)
+                elif isinstance(references, str):
+                    ref_text = f"\n\n**References:**\n{references}"
+            full_text = (summary or "") + (ref_text or "")
+            embed = create_professional_embed("Monsterrr Web Search", full_text)
+            await ctx.send(embed=embed)
+            # Sync search result to shared state for agent-bot sync
+            update_shared_state("search", {"query": query, "summary": summary, "references": references, "timestamp": datetime.now(IST).isoformat()})
+        except Exception as e:
+            logger.exception("Web search failed: %s", e)
+            await ctx.send(f"⚠️ Web Search Error: {e}")
 
 def update_shared_state(key, value):
     """Update the shared monsterrr_state.json for agent-bot sync."""
@@ -1476,96 +1476,98 @@ async def guide_cmd(ctx: commands.Context):
 
 @bot.command(name="status")
 async def status_cmd(ctx: commands.Context):
-    """Get current Monsterrr system status."""
-    @bot.command(name="status")
-    async def status_cmd(ctx: commands.Context):
-        """Get current Monsterrr system status (with agent/service sync)."""
-        try:
-            org = os.getenv("GITHUB_ORG", "unknown")
-            now_ist = datetime.now(IST)
-            uptime = str(now_ist - STARTUP_TIME).split(".")[0]
-            try:
-                cpu = psutil.cpu_percent(interval=0.1)
-                mem = psutil.virtual_memory()
-                mem_usage = f"{mem.percent:.1f}% (≈ {mem.used // (1024**2)} MB of {mem.total // (1024**2)} MB allocated)"
-            except Exception:
-                cpu = "N/A"
-                mem_usage = "N/A"
-            try:
-                hostname = socket.gethostname()
-                ip = socket.gethostbyname(hostname)
-            except Exception:
-                hostname = "Unknown"
-                ip = "Unknown"
-            repo_count = 0
-            try:
-                github = GitHubService(logger=logger)
-                repos = github.list_repositories() if hasattr(github, "list_repositories") else []
-                repo_count = len(repos)
-            except Exception:
-                pass
-            # Read shared state for agent-bot sync
-            shared_state = {}
-            try:
-                import json
-                with open("monsterrr_state.json", "r", encoding="utf-8") as f:
-                    shared_state = json.load(f)
-            except Exception:
-                pass
-            agent_status = shared_state.get("agent_status", "No agent status available.")
-            last_search = shared_state.get("search", {})
-            recent_users = list(unique_users)[-3:] if unique_users else []
-            recent_msgs = []
-            for uid in recent_users:
-                if uid in conversation_memory:
-                    recent_msgs.extend([m["content"] for m in conversation_memory[uid] if m.get("role") == "user"])
-            recent_msgs = recent_msgs[-3:] if recent_msgs else []
-            agent_msgs = []
-            for uid in recent_users:
-                if uid in conversation_memory:
-                    agent_msgs.extend([m["content"] for m in conversation_memory[uid] if m.get("role") in ("assistant", "agent")])
-            agent_msgs = agent_msgs[-3:] if agent_msgs else []
-            status_lines = [
-                f"**Current operational snapshot**",
-                f"- Uptime: {uptime} (started at {STARTUP_TIME.strftime('%Y-%m-%d %H:%M:%S IST')})",
-                f"- CPU load: {cpu} %",
-                f"- Memory usage: {mem_usage}",
-                f"- Hostname / IP: {hostname} / {ip}",
-                f"- Model in use: {GROQ_MODEL}",
-                f"- Managing GitHub organization: {org}",
-                f"- Repository count: {repo_count}",
-                f"- Total messages received: {total_messages}",
-                f"- Recent user activity:",
-            ]
-            if recent_msgs:
-                for msg in recent_msgs:
-                    status_lines.append(f"    • {msg}")
-            else:
-                status_lines.append("    • No recent user activity.")
-            status_lines.append(f"- Latest agent activity:")
-            if agent_msgs:
-                for msg in agent_msgs:
-                    status_lines.append(f"    • {msg}")
-            else:
-                status_lines.append("    • No recent agent activity.")
-            status_lines.append(f"- Agent/Service Status: {agent_status}")
-            if last_search:
-                status_lines.append(f"- Last Search: {last_search.get('query','')} | {last_search.get('summary','')[:100]}...")
-            embed = discord.Embed(
-                title="🤖 Monsterrr Status (Agent/Service Sync)",
-                description="\n".join(status_lines),
-                color=discord.Color.blue()
-            )
-            embed.set_footer(text=f"Monsterrr • {now_ist.strftime('%Y-%m-%d %H:%M IST')}")
-            await ctx.send(embed=embed)
-        except Exception as e:
-            await ctx.send(f"Error retrieving status: {e}")
-    """Show top ideas."""
+    """Get current Monsterrr system status (with agent/service sync)."""
     try:
+        org = os.getenv("GITHUB_ORG", "unknown")
+        now_ist = datetime.now(IST)
+        uptime = str(now_ist - STARTUP_TIME).split(".")[0]
+        try:
+            cpu = psutil.cpu_percent(interval=0.1)
+            mem = psutil.virtual_memory()
+            mem_usage = f"{mem.percent:.1f}% (≈ {mem.used // (1024**2)} MB of {mem.total // (1024**2)} MB allocated)"
+        except Exception:
+            cpu = "N/A"
+            mem_usage = "N/A"
+        try:
+            hostname = socket.gethostname()
+            ip = socket.gethostbyname(hostname)
+        except Exception:
+            hostname = "Unknown"
+            ip = "Unknown"
+        repo_count = 0
+        try:
+            github = GitHubService(logger=logger)
+            repos = github.list_repositories() if hasattr(github, "list_repositories") else []
+            repo_count = len(repos)
+        except Exception:
+            pass
+        # Read shared state for agent-bot sync
+        shared_state = {}
+        try:
+            import json
+            with open("monsterrr_state.json", "r", encoding="utf-8") as f:
+                shared_state = json.load(f)
+        except Exception:
+            pass
+        agent_status = shared_state.get("agent_status", "No agent status available.")
+        last_search = shared_state.get("search", {})
+        recent_users = list(unique_users)[-3:] if unique_users else []
+        recent_msgs = []
+        for uid in recent_users:
+            if uid in conversation_memory:
+                recent_msgs.extend([m["content"] for m in conversation_memory[uid] if m.get("role") == "user"])
+        recent_msgs = recent_msgs[-3:] if recent_msgs else []
+        agent_msgs = []
+        for uid in recent_users:
+            if uid in conversation_memory:
+                agent_msgs.extend([m["content"] for m in conversation_memory[uid] if m.get("role") in ("assistant", "agent")])
+        agent_msgs = agent_msgs[-3:] if agent_msgs else []
+        status_lines = [
+            f"**Current operational snapshot**",
+            f"- Uptime: {uptime} (started at {STARTUP_TIME.strftime('%Y-%m-%d %H:%M:%S IST')})",
+            f"- CPU load: {cpu} %",
+            f"- Memory usage: {mem_usage}",
+            f"- Hostname / IP: {hostname} / {ip}",
+            f"- Model in use: {GROQ_MODEL}",
+            f"- Managing GitHub organization: {org}",
+            f"- Repository count: {repo_count}",
+            f"- Total messages received: {total_messages}",
+            f"- Recent user activity:",
+        ]
+        if recent_msgs:
+            for msg in recent_msgs:
+                status_lines.append(f"    • {msg}")
+        else:
+            status_lines.append("    • No recent user activity.")
+        status_lines.append(f"- Latest agent activity:")
+        if agent_msgs:
+            for msg in agent_msgs:
+                status_lines.append(f"    • {msg}")
+        else:
+            status_lines.append("    • No recent agent activity.")
+        status_lines.append(f"- Agent/Service Status: {agent_status}")
+        if last_search:
+            status_lines.append(f"- Last Search: {last_search.get('query','')} | {last_search.get('summary','')[:100]}...")
+        embed = discord.Embed(
+            title="🤖 Monsterrr Status (Agent/Service Sync)",
+            description="\n".join(status_lines),
+            color=discord.Color.blue()
+        )
+        embed.set_footer(text=f"Monsterrr • {now_ist.strftime('%Y-%m-%d %H:%M IST')}")
+        await ctx.send(embed=embed)
+
+    except Exception as e:
+        await ctx.send(f"Error retrieving status: {e}")
+
+# --- IDEAS COMMAND ---
+@bot.command(name="ideas")
+async def ideas_cmd(ctx: commands.Context):
+    """Show top AI-generated ideas."""
+    try:
+        import json
         with open("monsterrr_state.json", "r", encoding="utf-8") as f:
             state = json.load(f)
         ideas = state.get("ideas", {}).get("top_ideas", [])
-        
         if ideas:
             idea_list = "\n".join(f"- **{i.get('name','')}**: {i.get('description','')}" for i in ideas)
             embed = create_professional_embed("Top Ideas", idea_list)
