@@ -1,3 +1,29 @@
+def update_system_status_in_state():
+    """Write system status fields to monsterrr_state.json for reporting."""
+    try:
+        import json
+        now = datetime.now(IST)
+        startup = STARTUP_TIME.strftime('%Y-%m-%d %H:%M:%S IST')
+        uptime = str(now - STARTUP_TIME).split(".")[0]
+        model = GROQ_MODEL
+        guilds = len(bot.guilds)
+        members = sum(g.member_count for g in bot.guilds)
+        state_path = "monsterrr_state.json"
+        if os.path.exists(state_path):
+            with open(state_path, "r", encoding="utf-8") as f:
+                state = json.load(f)
+        else:
+            state = {}
+        state["startup"] = startup
+        state["uptime"] = uptime
+        state["model"] = model
+        state["guilds"] = guilds
+        state["members"] = members
+        state["total_messages"] = total_messages
+        with open(state_path, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+    except Exception as e:
+        logger.error(f"Failed to update system status in state: {e}")
 """
 Monsterrr Discord bot — refactored single file
 - Removed duplicate code and errors
@@ -175,10 +201,29 @@ def run_orchestrator_background():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.create_task(orchestrator_wrapper())
-    loop.run_forever()
-
-orchestrator_thread = threading.Thread(target=run_orchestrator_background, daemon=True)
-orchestrator_thread.start()
+    # Only start orchestrator if not already running (avoid multiple starts)
+    if os.environ.get("MONSTERRR_ORCHESTRATOR_STARTED") != "1":
+        os.environ["MONSTERRR_ORCHESTRATOR_STARTED"] = "1"
+        def run_orchestrator_background():
+            import autonomous_orchestrator
+            async def orchestrator_wrapper():
+                while True:
+                    try:
+                        orchestrator_status["last_log"] = f"Started at {datetime.now(IST)}"
+                        await autonomous_orchestrator.daily_orchestration()
+                        orchestrator_status["last_run"] = datetime.now(IST).isoformat()
+                        orchestrator_status["last_success"] = orchestrator_status["last_run"]
+                        orchestrator_status["last_error"] = None
+                    except Exception as e:
+                        orchestrator_status["last_error"] = str(e)
+                        orchestrator_status["last_log"] = f"Error: {e}"
+                        time.sleep(60)
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.create_task(orchestrator_wrapper())
+            loop.run_forever()
+        orchestrator_thread = threading.Thread(target=run_orchestrator_background, daemon=True)
+        orchestrator_thread.start()
 
 # Discord bot setup
 intents = discord.Intents.default()
@@ -1237,7 +1282,29 @@ async def report_cmd(ctx: commands.Context, period: str = "daily"):
     """Executive reports."""
     try:
         result = report_service.generate_report(period) if hasattr(report_service, "generate_report") else None
-        await ctx.send(f"Report ({period}): {result}")
+        if not result:
+            await ctx.send("No report available.")
+            return
+        # Split report into sections for embed fields
+        lines = result.split('\n')
+        title = f"Monsterrr {period.capitalize()} Report"
+        embed = discord.Embed(title=title, color=0x2d7ff9)
+        section = None
+        value_lines = []
+        for line in lines:
+            if line.strip() == "":
+                continue
+            if any(line.startswith(h) for h in ["System Status:", "Top Ideas", "Active Repositories", "Branches", "Pull Requests", "Issues", "CI Pipeline", "Security Alerts", "Automation Bots", "Active Queue", "Analytics", "Tasks", "Recent User Activity", "What I can do next:", "Actions performed today:", "No actions recorded today."]):
+                if section and value_lines:
+                    embed.add_field(name=section, value="\n".join(value_lines)[:1024], inline=False)
+                section = line.replace(":", "").strip()
+                value_lines = []
+            else:
+                value_lines.append(line)
+        if section and value_lines:
+            embed.add_field(name=section, value="\n".join(value_lines)[:1024], inline=False)
+        embed.set_footer(text=f"Monsterrr • {datetime.now(IST).strftime('%Y-%m-%d %H:%M IST')}")
+        await ctx.send(embed=embed)
     except Exception as e:
         await ctx.send(f"Error generating report: {e}")
 
@@ -1476,6 +1543,7 @@ async def guide_cmd(ctx: commands.Context):
 
 @bot.command(name="status")
 async def status_cmd(ctx: commands.Context):
+    update_system_status_in_state()
     """Get current Monsterrr system status (with agent/service sync)."""
     try:
         org = os.getenv("GITHUB_ORG", "unknown")
@@ -1494,68 +1562,108 @@ async def status_cmd(ctx: commands.Context):
         except Exception:
             hostname = "Unknown"
             ip = "Unknown"
-        repo_count = 0
-        try:
-            github = GitHubService(logger=logger)
-            repos = github.list_repositories() if hasattr(github, "list_repositories") else []
-            repo_count = len(repos)
-        except Exception:
-            pass
-        # Read shared state for agent-bot sync
-        shared_state = {}
-        try:
-            import json
-            with open("monsterrr_state.json", "r", encoding="utf-8") as f:
-                shared_state = json.load(f)
-        except Exception:
-            pass
-        agent_status = shared_state.get("agent_status", "No agent status available.")
-        last_search = shared_state.get("search", {})
-        recent_users = list(unique_users)[-3:] if unique_users else []
-        recent_msgs = []
-        for uid in recent_users:
-            if uid in conversation_memory:
-                recent_msgs.extend([m["content"] for m in conversation_memory[uid] if m.get("role") == "user"])
-        recent_msgs = recent_msgs[-3:] if recent_msgs else []
-        agent_msgs = []
-        for uid in recent_users:
-            if uid in conversation_memory:
-                agent_msgs.extend([m["content"] for m in conversation_memory[uid] if m.get("role") in ("assistant", "agent")])
-        agent_msgs = agent_msgs[-3:] if agent_msgs else []
-        status_lines = [
-            f"**Current operational snapshot**",
-            f"- Uptime: {uptime} (started at {STARTUP_TIME.strftime('%Y-%m-%d %H:%M:%S IST')})",
-            f"- CPU load: {cpu} %",
-            f"- Memory usage: {mem_usage}",
-            f"- Hostname / IP: {hostname} / {ip}",
-            f"- Model in use: {GROQ_MODEL}",
-            f"- Managing GitHub organization: {org}",
-            f"- Repository count: {repo_count}",
-            f"- Total messages received: {total_messages}",
-            f"- Recent user activity:",
-        ]
-        if recent_msgs:
-            for msg in recent_msgs:
-                status_lines.append(f"    • {msg}")
-        else:
-            status_lines.append("    • No recent user activity.")
-        status_lines.append(f"- Latest agent activity:")
-        if agent_msgs:
-            for msg in agent_msgs:
-                status_lines.append(f"    • {msg}")
-        else:
-            status_lines.append("    • No recent agent activity.")
-        status_lines.append(f"- Agent/Service Status: {agent_status}")
-        if last_search:
-            status_lines.append(f"- Last Search: {last_search.get('query','')} | {last_search.get('summary','')[:100]}...")
-        embed = discord.Embed(
-            title="🤖 Monsterrr Status (Agent/Service Sync)",
-            description="\n".join(status_lines),
-            color=discord.Color.blue()
-        )
-        embed.set_footer(text=f"Monsterrr • {now_ist.strftime('%Y-%m-%d %H:%M IST')}")
-        await ctx.send(embed=embed)
 
+        try:
+            with open("monsterrr_state.json", "r", encoding="utf-8") as f:
+                state = json.load(f)
+        except Exception:
+            state = {}
+
+        # Compose embed
+        embed = discord.Embed(
+            title="🤖 Monsterrr System Status",
+            description=f"**Organization:** {org}\n**Startup:** {STARTUP_TIME.strftime('%Y-%m-%d %H:%M:%S IST')}\n**Uptime:** {uptime}",
+            color=0x2d7ff9
+        )
+        embed.add_field(name="Model", value=GROQ_MODEL, inline=True)
+        embed.add_field(name="Guilds", value=str(len(bot.guilds)), inline=True)
+        embed.add_field(name="Members", value=str(sum(g.member_count for g in bot.guilds)), inline=True)
+        embed.add_field(name="CPU Usage", value=str(cpu), inline=True)
+        embed.add_field(name="Memory Usage", value=str(mem_usage), inline=True)
+        embed.add_field(name="Host", value=f"{hostname} ({ip})", inline=True)
+        total_messages = state.get("total_messages", "N/A")
+        embed.add_field(name="Total Messages", value=str(total_messages), inline=True)
+
+        # Orchestrator status
+        orch = state.get("orchestrator", {})
+        embed.add_field(
+            name="Orchestrator",
+            value=f"Last Run: {orch.get('last_run', 'N/A')}\nLast Success: {orch.get('last_success', 'N/A')}\nLast Error: {orch.get('last_error', 'None')}\nLog: {orch.get('last_log', 'N/A')}",
+            inline=False
+        )
+
+        # Top ideas
+        ideas = state.get("ideas", {}).get("top_ideas", [])
+        if ideas:
+            idea_lines = [f"• **{i.get('name','')}**: {i.get('description','')}" for i in ideas[:3]]
+            embed.add_field(name="Top Ideas", value="\n".join(idea_lines), inline=False)
+
+        # Active repos
+        repos = state.get("repos", [])
+        if repos:
+            repo_lines = [f"• **{r.get('name','')}**: {r.get('description','')}" for r in repos[:3]]
+            embed.add_field(name="Active Repositories", value="\n".join(repo_lines), inline=False)
+
+        # Issues summary
+        issues = state.get("issues", {})
+        if issues:
+            embed.add_field(
+                name="Issues",
+                value=f"Total: {issues.get('count','N/A')} | Critical: {issues.get('critical',0)} | High: {issues.get('high',0)} | Medium: {issues.get('medium',0)} | Low: {issues.get('low',0)}",
+                inline=False
+            )
+
+        # CI status
+        ci = state.get("ci", {})
+        if ci:
+            embed.add_field(
+                name="CI Pipeline",
+                value=f"Status: {ci.get('status','N/A')} | Avg Duration: {ci.get('avg_duration','N/A')}",
+                inline=False
+            )
+
+        # Security alerts
+        sec = state.get("security", {})
+        if sec:
+            embed.add_field(
+                name="Security Alerts",
+                value=f"Critical: {sec.get('critical_alerts',0)} | Warnings: {sec.get('warnings',0)}",
+                inline=False
+            )
+
+        # Recent actions (today)
+        actions = state.get("actions", [])
+        if actions:
+            today = now_ist.date()
+            action_lines = []
+            for a in actions:
+                try:
+                    ts = a.get("timestamp")
+                    ts_date = datetime.fromisoformat(ts).date() if ts else None
+                    if ts_date == today:
+                        action_type = a.get("type", "action")
+                        details = a.get("details", {})
+                        if action_type == "ideas_fetched":
+                            action_lines.append(f"💡 Ideas fetched: {details.get('count',0)}")
+                        elif action_type == "daily_plan":
+                            plan = details.get('plan', [])
+                            plan_str = '; '.join(str(p) for p in plan)
+                            action_lines.append(f"📝 Planned: {plan_str}")
+                        elif action_type == "plan_executed":
+                            plan = details.get('plan', [])
+                            plan_str = '; '.join(str(p) for p in plan)
+                            action_lines.append(f"✅ Executed: {plan_str}")
+                        elif action_type == "maintenance":
+                            action_lines.append("🛠️ Maintenance performed")
+                        else:
+                            action_lines.append(f"🔹 {action_type}: {details}")
+                except Exception:
+                    continue
+            if action_lines:
+                embed.add_field(name="Today's Actions", value="\n".join(action_lines), inline=False)
+
+        embed.set_footer(text="✨ Powered by Monsterrr — All services are always available as commands.")
+        await ctx.send(embed=embed)
     except Exception as e:
         await ctx.send(f"Error retrieving status: {e}")
 

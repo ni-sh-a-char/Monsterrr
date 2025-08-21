@@ -1,3 +1,25 @@
+import json
+
+def log_monsterrr_action(action_type, details):
+    """Append an action to monsterrr_state.json for daily reporting."""
+    state_path = "monsterrr_state.json"
+    try:
+        if os.path.exists(state_path):
+            with open(state_path, "r", encoding="utf-8") as f:
+                state = json.load(f)
+        else:
+            state = {}
+        actions = state.get("actions", [])
+        actions.append({
+            "timestamp": datetime.now().isoformat(),
+            "type": action_type,
+            "details": details
+        })
+        state["actions"] = actions
+        with open(state_path, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+    except Exception as e:
+        logger.error(f"Failed to log action: {e}")
 """
 Monsterrr Autonomous Orchestrator
 Runs daily: fetches ideas, plans 3 AI contributions, executes them, and maintains repos.
@@ -28,24 +50,31 @@ creator_agent = CreatorAgent(github, logger)
 async def daily_orchestration():
     while True:
         logger.info("[Orchestrator] Starting daily AI orchestration cycle.")
-        # 1. Fetch and rank new ideas
-        ideas = idea_agent.fetch_and_rank_ideas(top_n=5)
-        logger.info(f"[Orchestrator] Fetched and ranked {len(ideas)} ideas.")
-        # 2. Plan 3 daily contributions
-        plan = maintainer_agent.plan_daily_contributions(num_contributions=3)
-        logger.info(f"[Orchestrator] Planned {len(plan)} daily contributions.")
-        # 3. Execute the plan
-        maintainer_agent.execute_daily_plan(plan, creator_agent=creator_agent)
-        logger.info("[Orchestrator] Executed daily plan.")
-        # 4. Perform repo maintenance
-        maintainer_agent.perform_maintenance()
-        logger.info("[Orchestrator] Performed repo maintenance.")
+    # 1. Fetch and rank new ideas
+    ideas = idea_agent.fetch_and_rank_ideas(top_n=5)
+    logger.info(f"[Orchestrator] Fetched and ranked {len(ideas)} ideas.")
+    log_monsterrr_action("ideas_fetched", {"count": len(ideas), "ideas": [i.get('name','') for i in ideas]})
+
+    # 2. Plan 3 daily contributions
+    plan = maintainer_agent.plan_daily_contributions(num_contributions=3)
+    logger.info(f"[Orchestrator] Planned {len(plan)} daily contributions.")
+    log_monsterrr_action("daily_plan", {"count": len(plan), "plan": plan})
+
+    # 3. Execute the plan
+    maintainer_agent.execute_daily_plan(plan, creator_agent=creator_agent)
+    logger.info("[Orchestrator] Executed daily plan.")
+    log_monsterrr_action("plan_executed", {"plan": plan})
+
+    # 4. Perform repo maintenance
+    maintainer_agent.perform_maintenance()
+    logger.info("[Orchestrator] Performed repo maintenance.")
+    log_monsterrr_action("maintenance", {"status": "completed"})
         # Sleep until next day (run at same time every day)
-        now = datetime.now()
-        next_run = (now + timedelta(days=1)).replace(hour=3, minute=0, second=0, microsecond=0)
-        sleep_seconds = (next_run - now).total_seconds()
-        logger.info(f"[Orchestrator] Sleeping for {sleep_seconds/3600:.2f} hours until next run.")
-        await asyncio.sleep(max(60, sleep_seconds))
+    now = datetime.now()
+    next_run = (now + timedelta(days=1)).replace(hour=3, minute=0, second=0, microsecond=0)
+    sleep_seconds = (next_run - now).total_seconds()
+    logger.info(f"[Orchestrator] Sleeping for {sleep_seconds/3600:.2f} hours until next run.")
+    await asyncio.sleep(max(60, sleep_seconds))
 
 if __name__ == "__main__":
     asyncio.run(daily_orchestration())
