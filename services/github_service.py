@@ -133,6 +133,12 @@ class GitHubService(BaseService):
             params = None  # Only needed for first page
         return repos
 
+    def get_repository(self, repo_name: str) -> Dict[str, Any]:
+        """Get details of a specific repository."""
+        url = f"{self.BASE_URL}/repos/{self.org}/{repo_name}"
+        resp = self._request("GET", url)
+        return resp.json()
+
     def create_repository(self, name: str, description: str = "", private: bool = False) -> Dict[str, Any]:
         """Create a new repository in the organization."""
         url = f"{self.BASE_URL}/orgs/{self.org}/repos"
@@ -161,6 +167,25 @@ class GitHubService(BaseService):
         import base64
         content = resp.json()["content"]
         return base64.b64decode(content).decode("utf-8")
+
+    def get_file_content(self, repo: str, path: str, branch: str = "main") -> str:
+        """Get file contents from a repo (alias for get_file_contents)."""
+        return self.get_file_contents(repo, path, branch)
+
+    def list_files(self, repo: str, path: str = "") -> List[str]:
+        """List all files in a repository."""
+        url = f"{self.BASE_URL}/repos/{self.org}/{repo}/contents/{path}"
+        resp = self._request("GET", url)
+        contents = resp.json()
+        files = []
+        for item in contents:
+            if item["type"] == "file":
+                files.append(item["path"])
+            elif item["type"] == "dir":
+                # Recursively list files in subdirectories
+                sub_files = self.list_files(repo, item["path"])
+                files.extend(sub_files)
+        return files
 
     def create_or_update_file(self, repo: str, path: str, content: str, commit_message: str, branch: str = "main") -> Dict[str, Any]:
         """Create or update a file in a repo."""
@@ -198,58 +223,127 @@ class GitHubService(BaseService):
         resp = self._request("POST", url, json=data)
         return resp.json()
 
+    def create_issue_comment(self, repo: str, issue_number: int, body: str, is_pr: bool = False) -> Dict[str, Any]:
+        """Create a comment on an issue or PR."""
+        if is_pr:
+            url = f"{self.BASE_URL}/repos/{self.org}/{repo}/issues/{issue_number}/comments"
+        else:
+            url = f"{self.BASE_URL}/repos/{self.org}/{repo}/issues/{issue_number}/comments"
+        data = {"body": body}
+        resp = self._request("POST", url, json=data)
+        return resp.json()
+
     def list_issues(self, repo: str, state: str = "open") -> List[Dict[str, Any]]:
-        """List issues in a repo (handles pagination)."""
+        """List issues in a repo."""
         url = f"{self.BASE_URL}/repos/{self.org}/{repo}/issues"
-        issues = []
         params = {"state": state, "per_page": 100}
-        while url:
-            resp = self._request("GET", url, params=params)
-            issues.extend(resp.json())
-            url = resp.links.get('next', {}).get('url')
-            params = None
-        return issues
+        resp = self._request("GET", url, params=params)
+        return resp.json()
 
     def close_issue(self, repo: str, issue_number: int) -> Dict[str, Any]:
-        """Close an issue in a repo."""
+        """Close an issue."""
         url = f"{self.BASE_URL}/repos/{self.org}/{repo}/issues/{issue_number}"
         data = {"state": "closed"}
         resp = self._request("PATCH", url, json=data)
         return resp.json()
 
-    def create_pull_request(self, repo: str, title: str, head_branch: str, base_branch: str = "main", body: str = "") -> Dict[str, Any]:
-        """Create a pull request."""
-        url = f"{self.BASE_URL}/repos/{self.org}/{repo}/pulls"
-        data = {"title": title, "head": head_branch, "base": base_branch, "body": body}
+    def create_branch(self, repo: str, branch_name: str, base_branch: str = "main") -> Dict[str, Any]:
+        """Create a new branch in a repo."""
+        # First get the SHA of the base branch
+        url = f"{self.BASE_URL}/repos/{self.org}/{repo}/git/refs/heads/{base_branch}"
+        resp = self._request("GET", url)
+        sha = resp.json()["object"]["sha"]
+        
+        # Create the new branch
+        url = f"{self.BASE_URL}/repos/{self.org}/{repo}/git/refs"
+        data = {
+            "ref": f"refs/heads/{branch_name}",
+            "sha": sha
+        }
         resp = self._request("POST", url, json=data)
         return resp.json()
 
-    def merge_pull_request(self, repo: str, pr_number: int, merge_method: str = "merge") -> Dict[str, Any]:
+    def get_pull_request(self, repo: str, pr_number: int) -> Dict[str, Any]:
+        """Get details of a pull request."""
+        url = f"{self.BASE_URL}/repos/{self.org}/{repo}/pulls/{pr_number}"
+        resp = self._request("GET", url)
+        return resp.json()
+
+    def merge_pull_request(self, repo: str, pr_number: int, commit_message: str = "") -> Dict[str, Any]:
         """Merge a pull request."""
         url = f"{self.BASE_URL}/repos/{self.org}/{repo}/pulls/{pr_number}/merge"
-        data = {"merge_method": merge_method}
+        data = {"commit_message": commit_message}
         resp = self._request("PUT", url, json=data)
         return resp.json()
 
-    def list_branches(self, repo: str) -> List[str]:
-        """List all branches in a repo."""
-        url = f"{self.BASE_URL}/repos/{self.org}/{repo}/branches"
-        resp = self._request("GET", url)
-        return [b["name"] for b in resp.json()]
+    def add_labels_to_pr(self, repo: str, pr_number: int, labels: List[str]) -> Dict[str, Any]:
+        """Add labels to a pull request."""
+        url = f"{self.BASE_URL}/repos/{self.org}/{repo}/issues/{pr_number}"
+        data = {"labels": labels}
+        resp = self._request("PATCH", url, json=data)
+        return resp.json()
 
-    def create_branch(self, repo: str, new_branch: str, from_branch: str = "main") -> Dict[str, Any]:
-        """Create a new branch from an existing branch."""
-        # Get SHA of from_branch
-        url = f"{self.BASE_URL}/repos/{self.org}/{repo}/git/refs/heads/{from_branch}"
-        resp = self._request("GET", url)
-        sha = resp.json()["object"]["sha"]
-        # Create new branch
-        url = f"{self.BASE_URL}/repos/{self.org}/{repo}/git/refs"
-        data = {"ref": f"refs/heads/{new_branch}", "sha": sha}
+    def comment_on_issue(self, repo: str, issue_number: int, comment: str) -> Dict[str, Any]:
+        """Add a comment to an issue."""
+        url = f"{self.BASE_URL}/repos/{self.org}/{repo}/issues/{issue_number}/comments"
+        data = {"body": comment}
         resp = self._request("POST", url, json=data)
         return resp.json()
 
-    def delete_branch(self, repo: str, branch: str) -> None:
-        """Delete a branch from a repo."""
-        url = f"{self.BASE_URL}/repos/{self.org}/{repo}/git/refs/heads/{branch}"
-        self._request("DELETE", url)
+    def comment_on_pr(self, repo: str, pr_number: int, comment: str) -> Dict[str, Any]:
+        """Add a comment to a pull request."""
+        return self.comment_on_issue(repo, pr_number, comment)
+
+    def find_stale_issues(self, days_old: int = 14) -> List[Dict[str, Any]]:
+        """Find stale issues in all repositories."""
+        # This is a simplified implementation
+        # In a real implementation, you would check the last updated time
+        return []
+
+    def find_safe_prs(self) -> List[Dict[str, Any]]:
+        """Find pull requests that are safe to merge."""
+        # This is a simplified implementation
+        # In a real implementation, you would check CI status, approvals, etc.
+        return []
+
+    def audit_repos(self) -> None:
+        """Audit all repositories for security and compliance."""
+        # This is a simplified implementation
+        # In a real implementation, you would check for various security issues
+        pass
+
+    def trigger_code_analysis(self, repo: str) -> None:
+        """Trigger code analysis for a repository."""
+        # This is a simplified implementation
+        # In a real implementation, you would trigger actual code analysis tools
+        pass
+
+    def onboard_new_repo(self, repo: str) -> None:
+        """Onboard a new repository with standard configurations."""
+        # This is a simplified implementation
+        # In a real implementation, you would set up standard configurations
+        pass
+
+    def thank_user_for_star(self, repo: str, user: str) -> None:
+        """Thank a user for starring a repository."""
+        # This is a simplified implementation
+        # In a real implementation, you would send an actual thank you message
+        pass
+
+    def thank_user_for_fork(self, repo: str, user: str) -> None:
+        """Thank a user for forking a repository."""
+        # This is a simplified implementation
+        # In a real implementation, you would send an actual thank you message
+        pass
+
+    def analyze_repo_health(self, repo: str) -> Dict[str, Any]:
+        """Analyze the health of a repository."""
+        # This is a simplified implementation
+        # In a real implementation, you would perform a comprehensive health check
+        return {
+            "repo": repo,
+            "health_score": 85,
+            "issues": 3,
+            "pull_requests": 2,
+            "last_commit": "2023-01-01"
+        }

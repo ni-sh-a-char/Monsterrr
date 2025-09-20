@@ -1060,6 +1060,8 @@ async def on_message(message: discord.Message):
                 ("language", "language_cmd"), ("triage", "triage_cmd"), ("poll", "poll_cmd"),
                 ("report", "report_cmd"), ("recognize", "recognize_cmd"), ("create", "create_repo"),
                 ("delete", "delete_repo"), ("add", "add_repo"), ("show", "show_repos"), ("list", "show_repos"),
+                ("brainstorm", "brainstorm_cmd"), ("plan", "plan_cmd"), ("execute", "execute_cmd"),
+                ("improve", "improve_cmd"), ("maintain", "maintain_cmd")
             ]
             
             intent = None
@@ -1378,6 +1380,121 @@ async def notify_cmd(ctx: commands.Context, *, message: str):
     except Exception as e:
         await ctx.send(f"Error sending notification: {e}")
 
+# Add new command handlers for enhanced functionality
+@bot.command(name="brainstorm")
+async def brainstorm_cmd(ctx: commands.Context, *, topic: str = None):
+    """Brainstorm new project ideas."""
+    try:
+        from agents.idea_agent import IdeaGeneratorAgent
+        idea_agent = IdeaGeneratorAgent(groq_service, logger)
+        ideas = idea_agent.fetch_and_rank_ideas(top_n=5)
+        
+        if ideas:
+            idea_list = "\n".join([
+                f"**{i.get('name', 'Project')}**\n"
+                f"Description: {i.get('description', 'N/A')}\n"
+                f"Tech Stack: {', '.join(i.get('tech_stack', []))}\n"
+                f"Features: {', '.join(i.get('features', []))}"
+                for i in ideas
+            ])
+            embed = create_professional_embed("Brainstormed Ideas", idea_list)
+            await ctx.send(embed=embed)
+        else:
+            await ctx.send("No ideas could be generated at this time.")
+    except Exception as e:
+        await ctx.send(f"Error brainstorming ideas: {e}")
+
+@bot.command(name="plan")
+async def plan_cmd(ctx: commands.Context):
+    """Generate a daily plan for contributions."""
+    try:
+        from agents.maintainer_agent import MaintainerAgent
+        from services.github_service import GitHubService
+        github = GitHubService(logger=logger)
+        maintainer = MaintainerAgent(github, groq_service, logger)
+        plan = maintainer.plan_daily_contributions(num_contributions=3)
+        
+        if plan:
+            plan_text = "\n".join([
+                f"**{p.get('type', 'task').title()}:** {p.get('name', 'N/A')}\n"
+                f"Description: {p.get('description', 'N/A')}\n"
+                f"Details: {p.get('details', 'N/A')}"
+                for p in plan
+            ])
+            embed = create_professional_embed("Daily Contribution Plan", plan_text)
+            await ctx.send(embed=embed)
+        else:
+            await ctx.send("No plan could be generated at this time.")
+    except Exception as e:
+        await ctx.send(f"Error generating plan: {e}")
+
+@bot.command(name="execute")
+async def execute_cmd(ctx: commands.Context):
+    """Execute the daily plan."""
+    try:
+        from agents.maintainer_agent import MaintainerAgent
+        from agents.creator_agent import CreatorAgent
+        from services.github_service import GitHubService
+        
+        github = GitHubService(logger=logger)
+        maintainer = MaintainerAgent(github, groq_service, logger)
+        creator = CreatorAgent(github, logger)
+        
+        # Get the latest plan
+        import glob
+        import json
+        plan_files = glob.glob("logs/daily_plan_*.json")
+        if plan_files:
+            plan_files.sort(reverse=True)
+            with open(plan_files[0], "r", encoding="utf-8") as f:
+                plan = json.load(f)
+            
+            maintainer.execute_daily_plan(plan, creator_agent=creator)
+            await ctx.send("Daily plan execution started. Check back later for results.")
+        else:
+            await ctx.send("No plan found to execute. Generate a plan first with `!plan`.")
+    except Exception as e:
+        await ctx.send(f"Error executing plan: {e}")
+
+@bot.command(name="improve")
+async def improve_cmd(ctx: commands.Context, repo: str):
+    """Improve an existing repository."""
+    try:
+        from agents.creator_agent import CreatorAgent
+        from services.github_service import GitHubService
+        
+        github = GitHubService(logger=logger)
+        creator = CreatorAgent(github, logger)
+        
+        # Create a dummy idea for improvement
+        idea = {
+            "name": repo,
+            "description": f"Improvement for {repo}",
+            "tech_stack": [],
+            "roadmap": [f"Improve {repo} functionality"]
+        }
+        
+        creator._improve_repository(repo, idea["description"], idea["roadmap"], idea["tech_stack"])
+        await ctx.send(f"Improvement process started for repository: {repo}")
+    except Exception as e:
+        await ctx.send(f"Error improving repository: {e}")
+
+@bot.command(name="maintain")
+async def maintain_cmd(ctx: commands.Context):
+    """Perform maintenance on all repositories."""
+    try:
+        from agents.maintainer_agent import MaintainerAgent
+        from services.github_service import GitHubService
+        
+        github = GitHubService(logger=logger)
+        maintainer = MaintainerAgent(github, groq_service, logger)
+        maintainer.perform_maintenance()
+        
+        await ctx.send("Maintenance tasks started across all repositories.")
+    except Exception as e:
+        await ctx.send(f"Error performing maintenance: {e}")
+
+
 @bot.command(name="language")
 async def language_cmd(ctx: commands.Context, lang: str, *, text: str):
     """Translate text to another language."""
@@ -1529,6 +1646,13 @@ async def guide_cmd(ctx: commands.Context):
             "`!buildcmd <spec>` — Build a command from a specification.",
             "`!integrate <platform>` — Integrate with other platforms.",
             "`!qa <time>` — Schedule a Q&A session."
+        ],
+        "🧠 Autonomous AI Operations": [
+            "`!brainstorm` — Generate new project ideas autonomously.",
+            "`!plan` — Create a daily contribution plan.",
+            "`!execute` — Execute the daily plan.",
+            "`!improve <repo>` — Improve an existing repository.",
+            "`!maintain` — Perform maintenance on all repositories."
         ],
         "🌐 Web Search & Natural Language": [
             "You can use `!search <query or url>` or just ask a question or paste a URL in chat. Monsterrr will search the web and summarize results like ChatGPT."

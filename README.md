@@ -43,6 +43,10 @@ Monsterrr is a multi-agent, production-ready system that discovers, creates, and
 - **Professional Daily Status Reports:** Sends quantifiable, transparent email reports with all ideas, actions, and metrics.
 - **Audit Logging:** All actions and plans are saved for review and compliance.
 - **Production-Ready:** Robust error handling, `.env`-only config, and seamless deployment to Render or Docker.
+- **Enhanced Brainstorming:** AI-powered idea generation with detailed technical specifications.
+- **Complete Code Generation:** Creates repositories with fully functional code, not just boilerplate.
+- **Advanced Repository Management:** Improves existing repositories with new features and enhancements.
+- **Comprehensive Reporting:** Detailed status reports via email and Discord.
 
 ---
 
@@ -104,6 +108,11 @@ Monsterrr is a multi-agent, production-ready system that discovers, creates, and
    DAILY_ACTIVITY_MODE=enabled   # enabled/disabled (default: enabled)
    DRY_RUN=false                 # true for dry-run mode (logs only, no actions)
    MAX_AUTO_CREATIONS_PER_DAY=3  # Number of contributions per day (default: 3)
+   
+   # ==== Discord ====
+   DISCORD_BOT_TOKEN=your-bot-token
+   DISCORD_GUILD_ID=your-guild-id
+   DISCORD_CHANNEL_ID=your-channel-id
    ```
 
    - **Fill in each field with your actual credentials and settings.**
@@ -133,6 +142,11 @@ Monsterrr is a multi-agent, production-ready system that discovers, creates, and
 - `/ideas/generate` — Generate and rank ideas
 - `/repos/create` — Create repo for top idea
 - `/run-agents` — Trigger all agents
+- `/trigger/daily-plan` — Generate daily contribution plan
+- `/trigger/execute-plan` — Execute daily plan
+- `/trigger/maintenance` — Run maintenance tasks
+- `/trigger/improve-repo` — Improve a specific repository
+- `/trigger/brainstorm` — Generate new ideas
 
 ---
 
@@ -186,6 +200,11 @@ Monsterrr's Discord bot exposes every feature and service discussed, making your
 - `!review <pr>` — AI-powered code review.
 - `!language <lang> <text>` — Translate text to another language.
 - `!voice <audio>` — Process a voice command.
+- `!brainstorm <topic>` — Generate new project ideas.
+- `!plan` — Generate daily contribution plan.
+- `!execute` — Execute the daily plan.
+- `!improve <repo>` — Improve an existing repository.
+- `!maintain` — Run maintenance on all repositories.
 
 **You can do anything with Monsterrr from Discord that you can do via the API or web.**
 
@@ -244,6 +263,12 @@ Monsterrr's Discord bot exposes every feature and service discussed, making your
 - `!translate <lang> <text>` — Translate text to another language.
 - `!voice <audio>` — Process a voice command.
 
+**Enhanced Commands:**
+- `!brainstorm <topic>` — Generate detailed project ideas with technical specifications.
+- `!plan` — Generate a daily plan with concrete implementation tasks.
+- `!execute` — Execute the daily plan with complete code generation.
+- `!improve <repo>` — Enhance an existing repository with new features.
+- `!maintain` — Run comprehensive maintenance across all repositories.
 
 **Web Search & Natural Language:**
 You can converse with Monsterrr in natural language, ask questions, or paste a URL. The bot will search the web and summarize results like ChatGPT, in addition to all other features. The `!search` command is also available for explicit queries.

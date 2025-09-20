@@ -30,6 +30,18 @@ from scheduler import start_scheduler
 
 app = FastAPI(title="Monsterrr API", description="Autonomous GitHub org manager.")
 
+# Keep-alive mechanism to prevent Render from shutting down the service
+def keep_alive():
+    """Ping the service periodically to keep it alive on Render"""
+    PORT = os.environ.get("PORT", 8000)
+    while True:
+        try:
+            requests.get(f"http://localhost:{PORT}/health")
+            time.sleep(600)  # Ping every 10 minutes
+        except Exception as e:
+            print(f"Keep-alive ping failed: {e}")
+            time.sleep(600)  # Continue pinging even if one fails
+
 def start_discord_bot():
     from services.discord_bot import bot
     import os
@@ -45,6 +57,9 @@ async def launch_services():
     loop = asyncio.get_event_loop()
     loop.create_task(start_scheduler())
     start_watchdog()
+    # Start keep-alive thread
+    keep_alive_thread = threading.Thread(target=keep_alive, daemon=True)
+    keep_alive_thread.start()
     # Startup email is now sent only by the scheduler, not here
     # Start Discord bot in a background thread
     if not hasattr(start_discord_bot, "_started"):
@@ -82,14 +97,20 @@ import time
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    return {"status": "ok", "timestamp": time.time()}
+
+@app.get("/healthz")
+async def healthz():
+    """Health check endpoint for Render"""
+    return {"status": "healthy", "timestamp": time.time()}
 
 def watchdog():
     while True:
         time.sleep(60)
         # Check health, restart if needed
         try:
-            r = requests.get("http://localhost:8000/health")
+            PORT = os.environ.get("PORT", 8000)
+            r = requests.get(f"http://localhost:{PORT}/health")
             if r.status_code != 200:
                 logger.error("Health check failed, restarting...")
                 os.execv(sys.executable, ['python'] + sys.argv)
@@ -111,31 +132,6 @@ async def launch_scheduler():
 # Start Discord bot in a background thread when FastAPI launches
 
 
-
-# Manual trigger for idea agent
-@app.post("/trigger/idea-agent")
-async def trigger_idea_agent():
-    ideas = idea_agent.fetch_and_rank_ideas(top_n=3)
-    return {"ideas": ideas}
-
-@app.get("/status")
-async def status():
-    """Get current Monsterrr state file."""
-    if os.path.exists("monsterrr_state.json"):
-        with open("monsterrr_state.json", "r", encoding="utf-8") as f:
-            state = json.load(f)
-        return state
-    return {"error": "No state file found."}
-
-@app.post("/ideas/generate")
-async def generate_ideas(req: IdeaRequest):
-    """Trigger idea generation and ranking."""
-    ideas = idea_agent.fetch_and_rank_ideas(top_n=req.top_n)
-    return {"ideas": ideas}
-
-@app.post("/webhook/github")
-async def github_webhook(request: Request):
-    payload = await request.json()
 
 # Manual trigger for idea agent
 @app.post("/trigger/idea-agent")
@@ -237,6 +233,71 @@ async def suggest_issue_fix(repo: str, issue_number: int):
     suggestion = groq.groq_llm(f"Suggest a fix for this GitHub issue: {issue.get('title')}")
     return {"issue": issue.get('title'), "suggestion": suggestion}
 
+@app.post("/trigger/daily-plan")
+async def trigger_daily_plan():
+    """Trigger the daily planning process."""
+    try:
+        plan = maintainer_agent.plan_daily_contributions(num_contributions=3)
+        return {"status": "success", "plan": plan}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.post("/trigger/execute-plan")
+async def trigger_execute_plan():
+    """Trigger the execution of the daily plan."""
+    try:
+        # Get the latest plan
+        import glob
+        import json
+        plan_files = glob.glob("logs/daily_plan_*.json")
+        if plan_files:
+            plan_files.sort(reverse=True)
+            with open(plan_files[0], "r", encoding="utf-8") as f:
+                plan = json.load(f)
+            
+            maintainer_agent.execute_daily_plan(plan, creator_agent=creator_agent)
+            return {"status": "success", "message": "Plan execution started"}
+        else:
+            return {"status": "error", "message": "No plan found to execute"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.post("/trigger/maintenance")
+async def trigger_maintenance():
+    """Trigger maintenance tasks."""
+    try:
+        maintainer_agent.perform_maintenance()
+        return {"status": "success", "message": "Maintenance tasks started"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.post("/trigger/improve-repo")
+async def trigger_improve_repo(repo_name: str):
+    """Trigger improvement of a specific repository."""
+    try:
+        # Create a dummy idea for improvement
+        idea = {
+            "name": repo_name,
+            "description": f"Improvement for {repo_name}",
+            "tech_stack": [],
+            "roadmap": [f"Improve {repo_name} functionality"]
+        }
+        
+        creator_agent._improve_repository(repo_name, idea["description"], idea["roadmap"], idea["tech_stack"])
+        return {"status": "success", "message": f"Improvement process started for {repo_name}"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.post("/trigger/brainstorm")
+async def trigger_brainstorm():
+    """Trigger brainstorming of new ideas."""
+    try:
+        ideas = idea_agent.fetch_and_rank_ideas(top_n=5)
+        return {"status": "success", "ideas": ideas}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000)
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port)

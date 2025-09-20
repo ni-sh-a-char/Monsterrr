@@ -151,8 +151,12 @@ class IdeaGeneratorAgent:
                 seen.add(name)
         prompt = (
             f"Given the following trending open-source project ideas, summarize, filter for uniqueness and impact, "
-            f"and rank the top {top_n} ideas. For each, provide: name, description, tech stack, difficulty (easy/med/hard), "
-            f"estimated dev time (weeks), and a 3-5 bullet roadmap."
+            f"and rank the top {top_n} ideas. For each, provide: name, description, detailed_description, tech stack, difficulty (easy/med/hard), "
+            f"estimated dev time (weeks), features (as a list), and a 5-7 step detailed roadmap. "
+            f"Make the ideas as specific and actionable as possible with complete technical details. "
+            f"The detailed_description should be 2-3 sentences explaining the problem the project solves. "
+            f"The features should be specific functionalities the project will have. "
+            f"Each roadmap step should be a concrete implementation task."
             f"\n\nIMPORTANT: Do NOT use tables in your answer. Instead, present all lists and structured data as professional, visually clear bullet points. Each idea should be a separate bullet with its details as sub-bullets."
             f"\n\nIdeas: {json.dumps(deduped)[:4000]}"
         )

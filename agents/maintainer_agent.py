@@ -108,7 +108,7 @@ class MaintainerAgent:
                 if ctype == "repo" and creator_agent:
                     idea = {"name": name, "description": desc}
                     idea.update(details)
-                    creator_agent.create_repository(idea)
+                    creator_agent.create_or_improve_repository(idea)
                     self.logger.info(f"[MaintainerAgent] Created repo: {name}")
                 elif ctype == "branch" and target_repo:
                     branch_name = name
@@ -161,6 +161,8 @@ class MaintainerAgent:
         Perform maintenance tasks across all repositories:
         - Respond to open issues with Groq suggestions
         - Auto-close stale issues/PRs
+        - Review code quality
+        - Update documentation
         """
         self.logger.info("[MaintainerAgent] Performing maintenance tasks.")
         try:
@@ -170,8 +172,61 @@ class MaintainerAgent:
                 self._handle_issues(repo_name)
                 self._handle_pull_requests(repo_name)
                 self._update_code(repo_name)
+                self._update_documentation(repo_name)
+                self._check_code_quality(repo_name)
         except Exception as e:
             self.logger.error(f"[MaintainerAgent] Error in maintenance: {e}")
+
+    def _update_documentation(self, repo: str):
+        """Update documentation for the repository."""
+        try:
+            # Get repository information
+            repo_info = self.github_service.get_repository(repo)
+            description = repo_info.get("description", "")
+            
+            # Generate updated documentation
+            prompt = f"Generate updated documentation for a repository named '{repo}' with description: '{description}'. Include sections for installation, usage, API documentation, and examples."
+            docs_content = self.groq_client.groq_llm(prompt)
+            
+            # Update documentation file
+            self.github_service.create_or_update_file(
+                repo, 
+                "docs/README.md", 
+                docs_content, 
+                f"Update documentation for {repo}"
+            )
+            self.logger.info(f"[MaintainerAgent] Updated documentation for {repo}")
+        except Exception as e:
+            self.logger.error(f"[MaintainerAgent] Error updating documentation for {repo}: {e}")
+
+    def _check_code_quality(self, repo: str):
+        """Check code quality and suggest improvements."""
+        try:
+            # Get list of files
+            files = self.github_service.list_files(repo)
+            
+            # Focus on Python files
+            py_files = [f for f in files if f.endswith(".py")]
+            
+            for file_path in py_files:
+                # Get file content
+                content = self.github_service.get_file_content(repo, file_path)
+                
+                # Analyze code quality
+                prompt = f"Analyze the following Python code for code quality issues, best practices, and potential improvements:\n\n{content[:2000]}"
+                analysis = self.groq_client.groq_llm(prompt)
+                
+                # Create an issue if significant issues are found
+                if "issue" in analysis.lower() or "improvement" in analysis.lower():
+                    self.github_service.create_issue(
+                        repo,
+                        title=f"Code quality review for {file_path}",
+                        body=analysis,
+                        labels=["code-quality", "bot-suggestion"]
+                    )
+                    self.logger.info(f"[MaintainerAgent] Created code quality issue for {file_path}")
+        except Exception as e:
+            self.logger.error(f"[MaintainerAgent] Error checking code quality for {repo}: {e}")
 
     def _update_code(self, repo: str):
         """Stub for code update/push logic (expand as needed)."""
@@ -192,7 +247,7 @@ class MaintainerAgent:
                 continue
             # Respond to issues with Groq suggestion
             try:
-                prompt = f"Suggest a concise fix or next step for this GitHub issue: {title}"
+                prompt = f"Suggest a concise fix or next step for this GitHub issue: {title}\n\nIssue description: {issue.get('body', '')[:500]}"
                 suggestion = self.groq_client.groq_llm(prompt)
                 self.github_service.create_issue(
                     repo,
@@ -214,6 +269,21 @@ class MaintainerAgent:
             if self._is_stale(last_updated):
                 # Optionally auto-close or comment on stale PRs
                 self.logger.info(f"[MaintainerAgent] PR #{number} in {repo} is stale.")
+            else:
+                # Review PR with AI
+                try:
+                    pr_details = self.github_service.get_pull_request(repo, number)
+                    prompt = f"Review this pull request and provide feedback:\n\nTitle: {pr_details.get('title', '')}\n\nDescription: {pr_details.get('body', '')[:500]}\n\nCode changes: [Code changes would be analyzed here]"
+                    review = self.groq_client.groq_llm(prompt)
+                    self.github_service.create_issue_comment(
+                        repo,
+                        number,
+                        f"## AI Code Review\n\n{review}",
+                        is_pr=True
+                    )
+                    self.logger.info(f"[MaintainerAgent] Reviewed PR #{number} in {repo}")
+                except Exception as e:
+                    self.logger.error(f"[MaintainerAgent] Error reviewing PR #{number}: {e}")
 
     def _is_stale(self, last_updated: str) -> bool:
         try:
