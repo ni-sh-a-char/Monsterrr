@@ -30,17 +30,17 @@ from scheduler import start_scheduler
 
 app = FastAPI(title="Monsterrr API", description="Autonomous GitHub org manager.")
 
-# Keep-alive mechanism to prevent Render from shutting down the service
-def keep_alive():
-    """Ping the service periodically to keep it alive on Render"""
-    PORT = os.environ.get("PORT", 8000)
-    while True:
-        try:
-            requests.get(f"http://localhost:{PORT}/health")
-            time.sleep(600)  # Ping every 10 minutes
-        except Exception as e:
-            print(f"Keep-alive ping failed: {e}")
-            time.sleep(600)  # Continue pinging even if one fails
+# Keep-alive mechanism DISABLED - External monitoring via Pulsetic
+# def keep_alive():
+#     """Ping the service periodically to keep it alive on Render"""
+#     PORT = os.environ.get("PORT", 8000)
+#     while True:
+#         try:
+#             requests.get(f"http://localhost:{PORT}/health")
+#             time.sleep(600)  # Ping every 10 minutes
+#         except Exception as e:
+#             print(f"Keep-alive ping failed: {e}")
+#             time.sleep(600)  # Continue pinging even if one fails
 
 def start_discord_bot():
     from services.discord_bot import bot
@@ -57,10 +57,7 @@ async def launch_services():
     loop = asyncio.get_event_loop()
     loop.create_task(start_scheduler())
     start_watchdog()
-    # Start keep-alive thread
-    keep_alive_thread = threading.Thread(target=keep_alive, daemon=True)
-    keep_alive_thread.start()
-    # Startup email is now sent only by the scheduler, not here
+    # Keep-alive mechanism DISABLED - External monitoring via Pulsetic
     # Start Discord bot in a background thread
     if not hasattr(start_discord_bot, "_started"):
         discord_thread = threading.Thread(target=start_discord_bot, daemon=True)
@@ -75,6 +72,7 @@ except Exception as e:
     raise
 groq = GroqService(api_key=settings.GROQ_API_KEY, logger=logger)
 github = GitHubService(logger=logger)
+github.groq_client = groq  # Pass Groq client to GitHub service for use in issue analysis
 try:
     github.validate_credentials()
 except Exception as e:

@@ -1,13 +1,9 @@
-"""
-Maintainer Agent for Monsterrr.
-"""
-
-
-from datetime import datetime, timedelta, timezone
+from typing import Dict, Any
+import os
+import json
+from datetime import datetime, timezone, timedelta
 IST = timezone(timedelta(hours=5, minutes=30))
-import sys, os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from typing import List, Dict, Any
+
 
 class MaintainerAgent:
     """
@@ -35,8 +31,16 @@ class MaintainerAgent:
             {"name": r["name"], "description": r.get("description", ""), "topics": r.get("topics", [])}
             for r in repos
         ]
+        
+        # Get organization stats for better context
+        try:
+            org_stats = self.github_service.get_organization_stats()
+        except Exception as e:
+            self.logger.error(f"[MaintainerAgent] Error getting org stats: {e}")
+            org_stats = {"repositories": []}
+        
         prompt = (
-            f"You are Monsterrr, an autonomous GitHub org manager. Given the following org repo metadata, "
+            f"You are Monsterrr, an autonomous GitHub organization manager. Given the following org repo metadata and organization statistics, "
             f"plan exactly {num_contributions} meaningful, substantial contributions for today. "
             f"Each contribution must be a significant step toward a fully working, production-quality project. "
             f"Write real, runnable code, not just stubs. Gradually build out features, tests, and documentation over time. "
@@ -44,7 +48,9 @@ class MaintainerAgent:
             f"Each contribution must be either: (1) create a new repo (with AI-generated name, description, tech stack, roadmap), "
             f"or (2) create a feature branch in an existing repo (with AI-generated branch name, short description, and a substantial starter file/change idea). "
             f"Branch names must be valid for Git, unique, and descriptive. Output a JSON list of contributions, each with type ('repo' or 'branch'), target repo (if branch), name, description, and details."
+            f"\n\nOrganization Statistics: Total Repositories: {org_stats.get('total_repos', 0)}, Members: {org_stats.get('members', 0)}, Public Repos: {org_stats.get('public_repos', 0)}, Private Repos: {org_stats.get('private_repos', 0)}, Teams: {org_stats.get('teams', 0)}"
             f"\n\nOrg repo metadata: {json.dumps(repo_metadata)[:4000]}"
+            f"\n\nFocus on improving existing repositories when possible, rather than always creating new ones. Consider the organization's current needs and gaps."
         )
         self.logger.info(f"[MaintainerAgent] Planning daily contributions with Groq.")
         plan = []
@@ -142,12 +148,21 @@ class MaintainerAgent:
                         "description": desc,
                         "file_path": file_path,
                         "commit_msg": commit_msg,
-                        "issue_title": issue_title
+                        "issue_title": issue_title,
+                        "created_at": datetime.now(IST).isoformat()
                     }
                     branches.append(branch_entry)
                     state["branches"] = branches
                     actions = state.get("actions", [])
-                    actions.append(f"Created branch {branch_name} in {target_repo} and committed {file_path}")
+                    actions.append({
+                        "timestamp": datetime.now(IST).isoformat(),
+                        "type": "branch_created",
+                        "details": {
+                            "branch_name": branch_name,
+                            "repo": target_repo,
+                            "file_path": file_path
+                        }
+                    })
                     state["actions"] = actions
                     with open(state_path, "w", encoding="utf-8") as f:
                         json.dump(state, f, indent=2)
@@ -163,6 +178,7 @@ class MaintainerAgent:
         - Auto-close stale issues/PRs
         - Review code quality
         - Update documentation
+        - Create project boards for tracking
         """
         self.logger.info("[MaintainerAgent] Performing maintenance tasks.")
         try:
@@ -174,8 +190,102 @@ class MaintainerAgent:
                 self._update_code(repo_name)
                 self._update_documentation(repo_name)
                 self._check_code_quality(repo_name)
+                self._create_project_tracking(repo_name)
         except Exception as e:
             self.logger.error(f"[MaintainerAgent] Error in maintenance: {e}")
+
+    def _create_project_tracking(self, repo: str):
+        """Create project tracking issues and milestones."""
+        try:
+            # Get repository details
+            repo_details = self.github_service.get_repository_details(repo)
+            
+            # Create a milestone for current work
+            from datetime import datetime, timedelta
+            due_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
+            
+            # Check if milestone already exists
+            # Note: GitHub API for milestones would be used here in a full implementation
+            self.logger.info(f"[MaintainerAgent] Would create project tracking for {repo} with due date {due_date}")
+            
+            # Create tracking issue with more comprehensive information
+            tracking_issue_body = f"""# Project Tracking for {repo}
+
+## Current Status
+- Open Issues: {repo_details['issues']['open']}
+- Closed Issues: {repo_details['issues']['closed']}
+- Open PRs: {repo_details['pull_requests']['open']}
+- Closed PRs: {repo_details['pull_requests']['closed']}
+- Last Updated: {repo_details['last_updated']}
+- Languages: {', '.join(repo_details['languages'].keys()) if repo_details['languages'] else 'Not specified'}
+
+## Repository Information
+- Description: {repo_details['basic_info'].get('description', 'No description')}
+- Stars: {repo_details['basic_info'].get('stargazers_count', 0)}
+- Forks: {repo_details['basic_info'].get('forks_count', 0)}
+- Watchers: {repo_details['basic_info'].get('watchers_count', 0)}
+
+## Next Goals
+- [ ] Implement core features
+- [ ] Add comprehensive tests
+- [ ] Improve documentation
+- [ ] Address technical debt
+- [ ] Add CI/CD pipeline
+- [ ] Improve code quality
+- [ ] Add examples and tutorials
+
+## Recent Activity
+Track recent commits, issues, and PRs here.
+
+## Action Items
+- [ ] Review open issues
+- [ ] Review open pull requests
+- [ ] Update documentation
+- [ ] Add tests for new features
+- [ ] Refactor code for better maintainability
+"""
+            
+            # Only create if it doesn't exist
+            existing_issues = self.github_service.list_issues(repo, state="all")
+            tracking_exists = any("Project Tracking" in issue.get("title", "") for issue in existing_issues)
+            
+            if not tracking_exists:
+                issue = self.github_service.create_issue(
+                    repo,
+                    title=f"Project Tracking for {repo}",
+                    body=tracking_issue_body,
+                    labels=["tracking", "project-management"]
+                )
+                self.logger.info(f"[MaintainerAgent] Created project tracking issue for {repo}")
+                
+                # Log this action
+                import os
+                import json
+                state_path = os.path.join(os.getcwd(), "monsterrr_state.json")
+                if os.path.exists(state_path):
+                    with open(state_path, "r", encoding="utf-8") as f:
+                        try:
+                            state = json.load(f)
+                        except Exception:
+                            state = {}
+                    
+                    actions = state.get("actions", [])
+                    actions.append({
+                        "timestamp": datetime.now().isoformat(),
+                        "type": "project_tracking_created",
+                        "details": {
+                            "repo": repo,
+                            "issue_number": issue.get("number", "unknown"),
+                            "issue_url": issue.get("html_url", "")
+                        }
+                    })
+                    state["actions"] = actions
+                    
+                    with open(state_path, "w", encoding="utf-8") as f:
+                        json.dump(state, f, indent=2)
+                
+        except Exception as e:
+            self.logger.error(f"[MaintainerAgent] Error creating project tracking for {repo}: {e}")
 
     def _update_documentation(self, repo: str):
         """Update documentation for the repository."""
@@ -291,29 +401,3 @@ class MaintainerAgent:
             return dt < datetime.now(IST) - timedelta(days=self.stale_days)
         except Exception:
             return False
-
-if __name__ == "__main__":
-    import logging
-    import os
-    from dotenv import load_dotenv
-    load_dotenv()
-    from services.github_service import GitHubService
-    from services.groq_service import GroqService
-    from utils.logger import setup_logger
-    from utils.config import Settings
-    logger = setup_logger()
-    settings = Settings()
-    try:
-        settings.validate()
-    except Exception as e:
-        logger.error(f"[Config] {e}")
-        raise
-    github = GitHubService(logger=logger)
-    try:
-        github.validate_credentials()
-    except Exception as e:
-        logger.error(f"[GitHubService] {e}")
-        raise
-    groq = GroqService(api_key=settings.GROQ_API_KEY, logger=logger)
-    agent = MaintainerAgent(github, groq, logger)
-    agent.perform_maintenance()

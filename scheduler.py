@@ -48,6 +48,7 @@ settings = Settings()
 logger = setup_logger()
 groq = GroqService(api_key=settings.GROQ_API_KEY, logger=logger)
 github = GitHubService(logger=logger)
+github.groq_client = groq  # Pass Groq client to GitHub service for use in issue analysis
 idea_agent = IdeaGeneratorAgent(groq, logger)
 creator_agent = CreatorAgent(github, logger)
 maintainer_agent = MaintainerAgent(github, groq, logger)
@@ -109,6 +110,18 @@ def send_startup_email():
                 state = json.load(f)
             except Exception:
                 state = {}
+    
+    # Get organization stats to include in the report
+    try:
+        org_stats = github.get_organization_stats()
+        # Update state with organization stats
+        state["organization_stats"] = org_stats
+        with open("monsterrr_state.json", "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+    except Exception as e:
+        logger.error(f"[Scheduler] Failed to get organization stats: {e}")
+        org_stats = {}
+    
     # Always define subject, html, and text, even if state is empty
     subject = "🚀 Monsterrr is Now Live! | Initial System Status"
     
@@ -127,6 +140,7 @@ def send_startup_email():
     <h2 style='color:#222;font-size:1.15em;margin-bottom:0.5em;'>Initial System Status</h2>
     <ul style='line-height:1.7;font-size:1.05em;'>
         <li><b>Repositories detected:</b> {summary.get('repositories', 0)}</li>
+        <li><b>Organization members:</b> {org_stats.get('members', 0) if org_stats else 0}</li>
         <li><b>Ideas generated:</b> {summary.get('ideas', 0)}</li>
         <li><b>Actions performed:</b> {summary.get('actions', 0)}</li>
         <li><b>Branches created:</b> {summary.get('branches', 0)}</li>
@@ -143,6 +157,7 @@ Organization: {settings.GITHUB_ORG}
 
 Initial System Status:
 Repositories detected: {summary.get('repositories', 0)}
+Organization members: {org_stats.get('members', 0) if org_stats else 0}
 Ideas generated: {summary.get('ideas', 0)}
 Actions performed: {summary.get('actions', 0)}
 Branches created: {summary.get('branches', 0)}

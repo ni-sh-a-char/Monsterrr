@@ -36,6 +36,11 @@ class ReportingService:
             repos = state.get("repos", [])
             repo_count = len(repos)
             
+            # Get organization stats if available
+            org_stats = state.get("organization_stats", {})
+            if org_stats and "total_repos" in org_stats:
+                repo_count = org_stats["total_repos"]
+            
             # Get idea information
             ideas = state.get("ideas", {}).get("top_ideas", [])
             idea_count = len(ideas)
@@ -48,6 +53,9 @@ class ReportingService:
             branches = state.get("branches", [])
             branch_count = len(branches)
             
+            # Get member information from org stats
+            member_count = org_stats.get("members", 0) if org_stats else 0
+            
             # Generate report data
             report = {
                 "timestamp": datetime.utcnow().isoformat(),
@@ -55,9 +63,11 @@ class ReportingService:
                     "repositories": repo_count,
                     "ideas": idea_count,
                     "actions": action_count,
-                    "branches": branch_count
+                    "branches": branch_count,
+                    "members": member_count
                 },
                 "repositories": repos,
+                "organization_stats": org_stats,
                 "ideas": ideas,
                 "actions": actions,
                 "branches": branches,
@@ -184,6 +194,10 @@ class ReportingService:
                     <div class="summary-value">{summary.get('branches', 0)}</div>
                     <div class="summary-label">Branches</div>
                 </div>
+                <div class="summary-item">
+                    <div class="summary-value">{summary.get('members', 0)}</div>
+                    <div class="summary-label">Members</div>
+                </div>
             </div>
             
             <div class="section">
@@ -271,7 +285,16 @@ class ReportingService:
 Monsterrr Status Report
 Generated on {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}
 
+Repositories: {summary.get('repositories', 0)}
+Ideas: {summary.get('ideas', 0)}
+Actions: {summary.get('actions', 0)}
+Branches: {summary.get('branches', 0)}
 SUMMARY
+Repositories: {summary.get('repositories', 0)}
+Ideas: {summary.get('ideas', 0)}
+Actions: {summary.get('actions', 0)}
+Branches: {summary.get('branches', 0)}
+Members: {summary.get('members', 0)}
 =======
 Repositories: {summary.get('repositories', 0)}
 Ideas: {summary.get('ideas', 0)}
@@ -330,6 +353,7 @@ Details: {str(action.get('details', 'N/A'))}
 - Ideas: {summary.get('ideas', 0)}
 - Actions: {summary.get('actions', 0)}
 - Branches: {summary.get('branches', 0)}
+- Members: {summary.get('members', 0)}
 
 Use `!status` for detailed information.
         """

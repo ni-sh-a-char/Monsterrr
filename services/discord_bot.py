@@ -1029,49 +1029,43 @@ async def on_message(message: discord.Message):
         unique_users.add(user_id)
         total_messages += 1
         
-        # Command intent detection
+        # Enhanced system context with current state awareness
         system_ctx = get_system_context(user_id)
-        classify_prompt = (
-            f"SYSTEM: You are an AI assistant for a GitHub org. "
-            f"NEVER use tables, pipes (|), or any table-like formatting in your answers. "
-            f"For all lists or structured data, ALWAYS use bullet points, sub-points, and numbering for clarity. "
-            f"Classify the following user message as either a 'command' (if it requests an action, e.g. create repo, assign task, merge PR, etc.) "
-            f"or a 'query' (if it is a general question or conversation). "
-            f"If it is a command, also extract the intent (e.g. create_repository, assign_task, show_ideas, etc.). "
-            f"Return a JSON object: {{'type': 'command'|'query', 'intent': <intent or null>}}.\n\nUser message: {content}"
-        )
         
-        try:
-            classification = await asyncio.to_thread(_call_groq, classify_prompt, GROQ_MODEL)
-            parsed = json.loads(classification)
-            intent_type = parsed.get('type')
-            intent = parsed.get('intent')
-        except Exception:
-            # Fallback keyword matching
-            command_intents = [
-                ("status", "show_status"), ("system status", "show_status"), ("current status", "show_status"),
-                ("guide", "guide_cmd"), ("help", "guide_cmd"), ("ideas", "show_ideas"), ("repos", "show_repos"),
-                ("show repos", "show_repos"), ("list repos", "show_repos"), ("roadmap", "roadmap"),
-                ("tasks", "show_tasks"), ("analytics", "show_analytics"), ("scan", "scan_repo"),
-                ("review", "review_pr"), ("docs", "show_docs"), ("integrate", "integrate_platform"),
-                ("qa", "run_qa"), ("close", "close_issue"), ("assign", "assign_task"), ("search", "search_cmd"),
-                ("alerts", "alerts_cmd"), ("notify", "notify_cmd"), ("codereview", "codereview_cmd"),
-                ("buildcmd", "buildcmd_cmd"), ("onboard", "onboard_cmd"), ("merge", "merge_cmd"),
-                ("language", "language_cmd"), ("triage", "triage_cmd"), ("poll", "poll_cmd"),
-                ("report", "report_cmd"), ("recognize", "recognize_cmd"), ("create", "create_repo"),
-                ("delete", "delete_repo"), ("add", "add_repo"), ("show", "show_repos"), ("list", "show_repos"),
-                ("brainstorm", "brainstorm_cmd"), ("plan", "plan_cmd"), ("execute", "execute_cmd"),
-                ("improve", "improve_cmd"), ("maintain", "maintain_cmd")
-            ]
-            
-            intent = None
-            intent_type = 'query'
-            
-            for kw, cmd in command_intents:
-                if kw in content.lower():
-                    intent = cmd
-                    intent_type = 'command'
-                    break
+        # First check if this is a command by looking for command keywords
+        # Even without "!" prefix, we should recognize commands
+        command_intents = [
+            ("status", "show_status"), ("system status", "show_status"), ("current status", "show_status"),
+            ("guide", "guide_cmd"), ("help", "guide_cmd"), ("ideas", "show_ideas"), ("repos", "show_repos"),
+            ("show repos", "show_repos"), ("list repos", "show_repos"), ("roadmap", "roadmap"),
+            ("tasks", "show_tasks"), ("analytics", "show_analytics"), ("scan", "scan_repo"),
+            ("review", "review_pr"), ("docs", "show_docs"), ("integrate", "integrate_platform"),
+            ("qa", "run_qa"), ("close", "close_issue"), ("assign", "assign_task"), ("search", "search_cmd"),
+            ("alerts", "alerts_cmd"), ("notify", "notify_cmd"), ("codereview", "codereview_cmd"),
+            ("buildcmd", "buildcmd_cmd"), ("onboard", "onboard_cmd"), ("merge", "merge_cmd"),
+            ("language", "language_cmd"), ("triage", "triage_cmd"), ("poll", "poll_cmd"),
+            ("report", "report_cmd"), ("recognize", "recognize_cmd"), ("create", "create_repo"),
+            ("delete", "delete_repo"), ("add", "add_repo"), ("show", "show_repos"), ("list", "show_repos"),
+            ("brainstorm", "brainstorm_cmd"), ("plan", "plan_cmd"), ("execute", "execute_cmd"),
+            ("improve", "improve_cmd"), ("maintain", "maintain_cmd"), ("enhance", "improve_cmd"),
+            ("upgrade", "improve_cmd"), ("update", "improve_cmd"), ("contribute", "plan_cmd"),
+            ("work", "execute_cmd"), ("build", "create_repo"), ("make", "create_repo"),
+            ("fix", "maintain_cmd"), ("repair", "maintain_cmd"), ("refactor", "improve_cmd"),
+            ("what can you do", "guide_cmd"), ("what are you", "guide_cmd"), ("who are you", "guide_cmd"),
+            ("tell me about", "status_cmd"), ("what's happening", "status_cmd"), ("what's up", "status_cmd"),
+            ("how are you", "status_cmd"), ("organization status", "status_cmd"), ("org status", "status_cmd"),
+            ("github status", "status_cmd"), ("project status", "status_cmd"), ("repo status", "status_cmd")
+        ]
+        
+        intent = None
+        intent_type = 'query'
+        
+        # Check for command keywords in the message
+        for kw, cmd in command_intents:
+            if kw in content.lower():
+                intent = cmd
+                intent_type = 'command'
+                break
         
         # URL detection for web search
         url_pattern = re.compile(r"https?://\S+", re.IGNORECASE)
@@ -1724,9 +1718,20 @@ async def status_cmd(ctx: commands.Context):
 
         # Active repos
         repos = state.get("repos", [])
-        if repos:
-            repo_lines = [f"• **{r.get('name','')}**: {r.get('description','')}" for r in repos[:3]]
+        github_repos = state.get("github_repos", [])
+        all_repos = repos if repos else github_repos
+        if all_repos:
+            repo_lines = [f"• **{r.get('name','')}**: {r.get('description','')}" for r in all_repos[:5]]
             embed.add_field(name="Active Repositories", value="\n".join(repo_lines), inline=False)
+        
+        # Organization stats
+        org_stats = state.get("organization_stats", {})
+        if org_stats:
+            embed.add_field(
+                name="Organization Stats",
+                value=f"Total Repos: {org_stats.get('total_repos', 0)} | Members: {org_stats.get('members', 0)} | Public Repos: {org_stats.get('public_repos', 0)} | Private Repos: {org_stats.get('private_repos', 0)}",
+                inline=False
+            )
 
         # Issues summary
         issues = state.get("issues", {})

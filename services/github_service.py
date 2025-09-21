@@ -57,40 +57,198 @@ class GitHubService(BaseService):
         except Exception as e:
             self.logger.error(f"[GitHubService] Credential validation error: {e}")
             raise
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), retry=retry_if_exception_type(httpx.RequestError))
-    def fetch_trending_repositories(self) -> List[Dict[str, Any]]:
-        """Fetch trending repositories using GitHub Search API (primary) or HTML scrape (fallback)."""
-        search_url = f"{self.BASE_URL}/search/repositories?q=stars:>1000&sort=stars&order=desc&per_page=25"
+    
+    def get_organization_info(self) -> Dict[str, Any]:
+        """Get detailed information about the organization."""
         try:
-            resp = self._request("GET", search_url)
-            data = resp.json()
-            repos = []
-            for item in data.get("items", []):
-                repos.append({"name": item["name"], "description": item.get("description", "")})
-            if repos:
-                return repos
+            url = f"{self.BASE_URL}/orgs/{self.org}"
+            resp = self._request("GET", url)
+            return resp.json()
         except Exception as e:
-            self.logger.error(f"[GitHubService] Search API error: {e}")
-        # Fallback: scrape HTML
+            self.logger.error(f"[GitHubService] Error getting org info: {e}")
+            return {}
+    
+    def get_organization_stats(self) -> Dict[str, Any]:
+        """Get organization statistics including repo count, member count, etc."""
         try:
-            import requests
-            from bs4 import BeautifulSoup
-            html_url = "https://github.com/trending?since=weekly"
-            resp = requests.get(html_url, timeout=10)
-            bs = BeautifulSoup(resp.text, "html.parser")
-            repos = []
-            for repo_tag in bs.select("article.Box-row"):
-                name_tag = repo_tag.select_one("h2 a")
-                desc_tag = repo_tag.select_one("p")
-                name = name_tag.text.strip().replace("\n", "").replace(" ", "") if name_tag else ""
-                desc = desc_tag.text.strip() if desc_tag else ""
-                if name:
-                    repos.append({"name": name, "description": desc})
-            if repos:
-                return repos
+            # Get organization info
+            org_info = self.get_organization_info()
+            
+            # Get repositories
+            repos = self.list_repositories()
+            
+            # Get members
+            members_url = f"{self.BASE_URL}/orgs/{self.org}/members"
+            try:
+                members_resp = self._request("GET", members_url)
+                members = members_resp.json()
+            except:
+                members = []
+            
+            # Count public and private repos
+            public_repos = [r for r in repos if not r.get('private', True)]
+            private_repos = [r for r in repos if r.get('private', False)]
+            
+            # Get additional organization information
+            try:
+                # Get organization public members
+                public_members_url = f"{self.BASE_URL}/orgs/{self.org}/public_members"
+                public_members_resp = self._request("GET", public_members_url)
+                public_members = public_members_resp.json()
+            except:
+                public_members = []
+            
+            # Get organization teams
+            try:
+                teams_url = f"{self.BASE_URL}/orgs/{self.org}/teams"
+                teams_resp = self._request("GET", teams_url)
+                teams = teams_resp.json()
+            except:
+                teams = []
+            
+            return {
+                "name": org_info.get("login", self.org),
+                "description": org_info.get("description", ""),
+                "public_repos": len(public_repos),
+                "private_repos": len(private_repos),
+                "total_repos": len(repos),
+                "members": len(members),
+                "public_members": len(public_members),
+                "teams": len(teams),
+                "created_at": org_info.get("created_at", ""),
+                "updated_at": org_info.get("updated_at", ""),
+                "repositories": [
+                    {
+                        "name": r["name"],
+                        "description": r.get("description", ""),
+                        "language": r.get("language", ""),
+                        "stars": r.get("stargazers_count", 0),
+                        "forks": r.get("forks_count", 0),
+                        "issues": r.get("open_issues_count", 0),
+                        "updated_at": r.get("updated_at", ""),
+                        "created_at": r.get("created_at", ""),
+                        "private": r.get("private", False),
+                        "url": r.get("html_url", "")
+                    }
+                    for r in repos
+                ]
+            }
         except Exception as e:
-            self.logger.error(f"[GitHubService] Trending HTML scrape error: {e}")
-        return []
+            self.logger.error(f"[GitHubService] Error getting org stats: {e}")
+            return {
+                "name": self.org,
+                "total_repos": 0,
+                "members": 0,
+                "public_members": 0,
+                "teams": 0,
+                "repositories": []
+            }
+    
+    def get_repository_details(self, repo_name: str) -> Dict[str, Any]:
+        """Get detailed information about a specific repository including issues, PRs, etc."""
+        try:
+            # Get basic repo info
+            repo_info = self.get_repository(repo_name)
+            
+            # Get issues
+            issues = self.list_issues(repo_name, state="all")
+            
+            # Get pull requests (using search since there's no direct API)
+            try:
+                pr_search_url = f"{self.BASE_URL}/search/issues"
+                pr_params = {
+                    "q": f"repo:{self.org}/{repo_name} is:pr",
+                    "per_page": 100
+                }
+                pr_resp = self._request("GET", pr_search_url, params=pr_params)
+                prs = pr_resp.json().get("items", [])
+            except:
+                prs = []
+            
+            # Get branches
+            try:
+                branches_url = f"{self.BASE_URL}/repos/{self.org}/{repo_name}/branches"
+                branches_resp = self._request("GET", branches_url)
+                branches = branches_resp.json()
+            except:
+                branches = []
+            
+            # Get languages
+            try:
+                languages_url = f"{self.BASE_URL}/repos/{self.org}/{repo_name}/languages"
+                languages_resp = self._request("GET", languages_url)
+                languages = languages_resp.json()
+            except:
+                languages = {}
+            
+            # Get contributors
+            try:
+                contributors_url = f"{self.BASE_URL}/repos/{self.org}/{repo_name}/contributors"
+                contributors_resp = self._request("GET", contributors_url)
+                contributors = contributors_resp.json()
+            except:
+                contributors = []
+            
+            # Get commits
+            try:
+                commits_url = f"{self.BASE_URL}/repos/{self.org}/{repo_name}/commits"
+                commits_resp = self._request("GET", commits_url, params={"per_page": 10})
+                commits = commits_resp.json()
+            except:
+                commits = []
+            
+            # Get releases
+            try:
+                releases_url = f"{self.BASE_URL}/repos/{self.org}/{repo_name}/releases"
+                releases_resp = self._request("GET", releases_url)
+                releases = releases_resp.json()
+            except:
+                releases = []
+            
+            return {
+                "basic_info": repo_info,
+                "issues": {
+                    "open": len([i for i in issues if i.get("state") == "open"]),
+                    "closed": len([i for i in issues if i.get("state") == "closed"]),
+                    "total": len(issues)
+                },
+                "pull_requests": {
+                    "open": len([pr for pr in prs if pr.get("state") == "open"]),
+                    "closed": len([pr for pr in prs if pr.get("state") in ["closed", "merged"]]),
+                    "total": len(prs)
+                },
+                "branches": [b["name"] for b in branches],
+                "languages": languages,
+                "contributors": len(contributors),
+                "recent_commits": [
+                    {
+                        "author": commit["commit"]["author"]["name"],
+                        "message": commit["commit"]["message"],
+                        "date": commit["commit"]["author"]["date"]
+                    }
+                    for commit in commits[:5]
+                ],
+                "releases": len(releases),
+                "last_updated": repo_info.get("updated_at", ""),
+                "created_at": repo_info.get("created_at", ""),
+                "size": repo_info.get("size", 0)
+            }
+        except Exception as e:
+            self.logger.error(f"[GitHubService] Error getting repo details for {repo_name}: {e}")
+            return {
+                "basic_info": {},
+                "issues": {"open": 0, "closed": 0, "total": 0},
+                "pull_requests": {"open": 0, "closed": 0, "total": 0},
+                "branches": [],
+                "languages": {},
+                "contributors": 0,
+                "recent_commits": [],
+                "releases": 0,
+                "last_updated": "",
+                "created_at": "",
+                "size": 0
+            }
+    
     """
     Service for interacting with the GitHub REST API (and optional GraphQL API).
     Provides methods for repo, file, issue, PR, and branch management.
@@ -231,6 +389,12 @@ class GitHubService(BaseService):
             url = f"{self.BASE_URL}/repos/{self.org}/{repo}/issues/{issue_number}/comments"
         data = {"body": body}
         resp = self._request("POST", url, json=data)
+        return resp.json()
+
+    def get_issue_comments(self, repo: str, issue_number: int) -> List[Dict[str, Any]]:
+        """Get comments for an issue or PR."""
+        url = f"{self.BASE_URL}/repos/{self.org}/{repo}/issues/{issue_number}/comments"
+        resp = self._request("GET", url)
         return resp.json()
 
     def list_issues(self, repo: str, state: str = "open") -> List[Dict[str, Any]]:

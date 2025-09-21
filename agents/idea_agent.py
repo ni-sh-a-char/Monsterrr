@@ -1,16 +1,11 @@
-"""
-Idea Generator Agent for Monsterrr.
-"""
-
-
-import requests
-import json
-import os
-import sys
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-import time
 from typing import List, Dict, Any
-from datetime import datetime
+import os
+import json
+import time
+import requests
+from datetime import datetime, timezone, timedelta
+IST = timezone(timedelta(hours=5, minutes=30))
+
 
 class IdeaGeneratorAgent:
     def fetch_trending_producthunt(self) -> list:
@@ -49,6 +44,82 @@ class IdeaGeneratorAgent:
         except Exception as e:
             self.logger.error(f"[IdeaGeneratorAgent] Reddit fetch error: {e}")
             return []
+    
+    def fetch_trending_github_topics(self) -> list:
+        """Fetch trending topics from GitHub."""
+        try:
+            import requests
+            from bs4 import BeautifulSoup
+            resp = requests.get("https://github.com/topics", timeout=10)
+            bs = BeautifulSoup(resp.text, "html.parser")
+            topics = []
+            for topic in bs.select("div[data-topic-name]"):
+                name = topic.select_one("a[href*='/topics/']")
+                desc = topic.select_one("p")
+                if name:
+                    topic_name = name.text.strip()
+                    topic_desc = desc.text.strip() if desc else ""
+                    topics.append({
+                        "name": topic_name,
+                        "description": topic_desc
+                    })
+            return topics
+        except Exception as e:
+            self.logger.error(f"[IdeaGeneratorAgent] GitHub topics fetch error: {e}")
+            return []
+    
+    def fetch_trending_devto_week(self) -> list:
+        """Fetch top articles from Dev.to for the week."""
+        try:
+            import requests
+            resp = requests.get("https://dev.to/api/articles?top=1&per_page=15&tag=week", timeout=10)
+            resp.raise_for_status()
+            articles = resp.json()
+            return [{
+                "name": article["title"],
+                "description": article.get("description", article.get("body_markdown", ""))[:200]
+            } for article in articles]
+        except Exception as e:
+            self.logger.error(f"[IdeaGeneratorAgent] Dev.to week fetch error: {e}")
+            return []
+    
+    def fetch_trending_hackernews_month(self) -> list:
+        """Fetch top stories from Hacker News for the month."""
+        try:
+            import requests
+            # Get more stories for better variety
+            top_ids = requests.get("https://hacker-news.firebaseio.com/v0/topstories.json", timeout=10).json()[:30]
+            stories = []
+            for sid in top_ids:
+                try:
+                    item = requests.get(f"https://hacker-news.firebaseio.com/v0/item/{sid}.json", timeout=5).json()
+                    if item and 'title' in item:
+                        stories.append({
+                            "name": item["title"],
+                            "description": item.get("text", "")[:200] if item.get("text") else ""
+                        })
+                except:
+                    continue
+            return stories
+        except Exception as e:
+            self.logger.error(f"[IdeaGeneratorAgent] HackerNews month fetch error: {e}")
+            return []
+    
+    def fetch_trending_stackoverflow(self) -> list:
+        """Fetch trending tags from Stack Overflow."""
+        try:
+            import requests
+            resp = requests.get("https://api.stackexchange.com/2.3/tags?order=desc&sort=popular&site=stackoverflow&pagesize=20", timeout=10)
+            resp.raise_for_status()
+            tags = resp.json()["items"]
+            return [{
+                "name": f"{tag['name']} Development Tool",
+                "description": f"A tool or library for {tag['name']} development"
+            } for tag in tags[:10]]  # Limit to top 10
+        except Exception as e:
+            self.logger.error(f"[IdeaGeneratorAgent] Stack Overflow fetch error: {e}")
+            return []
+
     """
     Agent for discovering and ranking new open-source project ideas.
     Fetches from GitHub Trending, Dev.to, HackerNews, summarizes/ranks with Groq, and stores results.
@@ -78,7 +149,13 @@ class IdeaGeneratorAgent:
             data = resp.json()
             repos = []
             for item in data.get("items", []):
-                repos.append({"name": item["name"], "description": item.get("description", "")})
+                repos.append({
+                    "name": item["name"], 
+                    "description": item.get("description", ""),
+                    "language": item.get("language", ""),
+                    "stars": item.get("stargazers_count", 0),
+                    "forks": item.get("forks_count", 0)
+                })
             if repos:
                 return repos
         except Exception as e:
@@ -93,10 +170,16 @@ class IdeaGeneratorAgent:
             for repo_tag in bs.select("article.Box-row"):
                 name_tag = repo_tag.select_one("h2 a")
                 desc_tag = repo_tag.select_one("p")
+                lang_tag = repo_tag.select_one("[itemprop='programmingLanguage']")
                 name = name_tag.text.strip().replace("\n", "").replace(" ", "") if name_tag else ""
                 desc = desc_tag.text.strip() if desc_tag else ""
+                lang = lang_tag.text.strip() if lang_tag else ""
                 if name:
-                    repos.append({"name": name, "description": desc})
+                    repos.append({
+                        "name": name, 
+                        "description": desc,
+                        "language": lang
+                    })
             if repos:
                 return repos
         except Exception as e:
@@ -140,7 +223,20 @@ class IdeaGeneratorAgent:
         producthunt = self.fetch_trending_producthunt()
         reddit_ml = self.fetch_trending_reddit("MachineLearning")
         reddit_ai = self.fetch_trending_reddit("Artificial")
-        all_ideas = github + hn + devto + producthunt + reddit_ml + reddit_ai
+        github_topics = self.fetch_trending_github_topics()
+        devto_week = self.fetch_trending_devto_week()
+        hn_month = self.fetch_trending_hackernews_month()
+        stackoverflow = self.fetch_trending_stackoverflow()
+        
+        # Additional sources for more diverse ideas
+        reddit_programming = self.fetch_trending_reddit("programming")
+        reddit_webdev = self.fetch_trending_reddit("webdev")
+        reddit_python = self.fetch_trending_reddit("Python")
+        reddit_javascript = self.fetch_trending_reddit("javascript")
+        
+        # Combine all ideas
+        all_ideas = github + hn + devto + producthunt + reddit_ml + reddit_ai + github_topics + devto_week + hn_month + stackoverflow + reddit_programming + reddit_webdev + reddit_python + reddit_javascript
+        
         # Deduplicate by name
         seen = set()
         deduped = []
@@ -149,6 +245,7 @@ class IdeaGeneratorAgent:
             if name and name not in seen:
                 deduped.append(idea)
                 seen.add(name)
+        
         prompt = (
             f"Given the following trending open-source project ideas, summarize, filter for uniqueness and impact, "
             f"and rank the top {top_n} ideas. For each, provide: name, description, detailed_description, tech stack, difficulty (easy/med/hard), "
@@ -189,31 +286,3 @@ class IdeaGeneratorAgent:
         }
         self._save_state(state)
         return ideas[:top_n]
-
-    def _load_state(self) -> Dict[str, Any]:
-        if os.path.exists(self.IDEA_FILE):
-            with open(self.IDEA_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        return {}
-
-    def _save_state(self, state: Dict[str, Any]):
-        with open(self.IDEA_FILE, 'w', encoding='utf-8') as f:
-            json.dump(state, f, indent=2)
-
-if __name__ == "__main__":
-    import logging
-    from services.groq_service import GroqService
-    from utils.logger import setup_logger
-    from utils.config import Settings
-    import json
-    logger = setup_logger()
-    settings = Settings()
-    try:
-        settings.validate()
-    except Exception as e:
-        logger.error(f"[Config] {e}")
-        raise
-    groq = GroqService(api_key=settings.GROQ_API_KEY, logger=logger)
-    agent = IdeaGeneratorAgent(groq, logger)
-    ideas = agent.fetch_and_rank_ideas()
-    print(json.dumps(ideas, indent=2))
