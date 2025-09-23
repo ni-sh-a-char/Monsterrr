@@ -210,6 +210,25 @@ class IdeaGeneratorAgent:
             self.logger.error(f"[IdeaGeneratorAgent] Dev.to fetch error: {e}")
             return []
 
+    def _load_state(self):
+        """Load the monsterrr state from file."""
+        if os.path.exists(self.IDEA_FILE):
+            try:
+                with open(self.IDEA_FILE, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception as e:
+                self.logger.error(f"[IdeaGeneratorAgent] Error loading state: {e}")
+                return {}
+        return {}
+
+    def _save_state(self, state):
+        """Save the monsterrr state to file."""
+        try:
+            with open(self.IDEA_FILE, "w", encoding="utf-8") as f:
+                json.dump(state, f, indent=2, default=str)
+        except Exception as e:
+            self.logger.error(f"[IdeaGeneratorAgent] Error saving state: {e}")
+
     def fetch_and_rank_ideas(self, top_n: int = 5) -> List[Dict[str, Any]]:
         """
         Fetch trending ideas from multiple sources, deduplicate, summarize and rank with Groq, and store top N in monsterrr_state.json.

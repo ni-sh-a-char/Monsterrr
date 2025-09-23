@@ -1,5 +1,6 @@
 # Background monitoring tasks
 import asyncio
+from datetime import datetime
 from services.github_service import GitHubService
 from utils.logger import setup_logger
 github = GitHubService(logger=setup_logger())
@@ -65,12 +66,103 @@ reporting_service = ReportingService(
 scheduler = AsyncIOScheduler()
 
 def daily_job():
-    logger.info("[Scheduler] Running daily job: MaintainerAgent plans and executes 3 contributions + status report.")
-    # Plan 3 contributions and execute them (not dry-run)
-    plan = maintainer_agent.plan_daily_contributions(num_contributions=3)
-    maintainer_agent.execute_daily_plan(plan, creator_agent=creator_agent, dry_run=False)
-    # After execution, send status report
-    send_status_report()
+    """Enhanced daily job that ensures actual work is performed."""
+    logger.info("[Scheduler] Running enhanced daily job: MaintainerAgent plans and executes 3 contributions + status report.")
+    
+    try:
+        # Ensure we have the latest organization stats
+        try:
+            org_stats = github.get_organization_stats()
+            logger.info(f"[Scheduler] Organization stats: {org_stats.get('total_repos', 0)} repos, {org_stats.get('members', 0)} members")
+            
+            # Update state with organization stats
+            state_path = "monsterrr_state.json"
+            state = {}
+            if os.path.exists(state_path):
+                with open(state_path, "r", encoding="utf-8") as f:
+                    try:
+                        state = json.load(f)
+                    except Exception:
+                        state = {}
+            
+            state["organization_stats"] = org_stats
+            with open(state_path, "w", encoding="utf-8") as f:
+                json.dump(state, f, indent=2)
+        except Exception as e:
+            logger.error(f"[Scheduler] Error getting organization stats: {e}")
+        
+        # Plan 3 contributions and execute them (not dry-run)
+        logger.info("[Scheduler] Planning daily contributions...")
+        plan = maintainer_agent.plan_daily_contributions(num_contributions=3)
+        
+        if plan:
+            logger.info(f"[Scheduler] Executing {len(plan)} planned contributions...")
+            maintainer_agent.execute_daily_plan(plan, creator_agent=creator_agent, dry_run=False)
+            
+            # Log successful execution
+            state_path = "monsterrr_state.json"
+            if os.path.exists(state_path):
+                with open(state_path, "r", encoding="utf-8") as f:
+                    try:
+                        state = json.load(f)
+                    except Exception:
+                        state = {}
+                
+                actions = state.get("actions", [])
+                actions.append({
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "type": "daily_plan_executed",
+                    "details": {
+                        "contributions_count": len(plan),
+                        "plan": plan
+                    }
+                })
+                state["actions"] = actions
+                
+                with open(state_path, "w", encoding="utf-8") as f:
+                    json.dump(state, f, indent=2)
+        else:
+            logger.warning("[Scheduler] No contributions planned. Creating a default repository...")
+            # If no plan was generated, create a default repository
+            default_idea = {
+                "name": f"monsterrr-project-{datetime.utcnow().strftime('%Y%m%d-%H%M')}",
+                "description": "Auto-generated project by Monsterrr autonomous agent",
+                "tech_stack": ["Python", "FastAPI"],
+                "roadmap": ["Initialize project structure", "Add basic API endpoints", "Implement tests"]
+            }
+            creator_agent.create_or_improve_repository(default_idea)
+            
+            # Log this action
+            state_path = "monsterrr_state.json"
+            if os.path.exists(state_path):
+                with open(state_path, "r", encoding="utf-8") as f:
+                    try:
+                        state = json.load(f)
+                    except Exception:
+                        state = {}
+                
+                actions = state.get("actions", [])
+                actions.append({
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "type": "default_repo_created",
+                    "details": {
+                        "repo_name": default_idea["name"]
+                    }
+                })
+                state["actions"] = actions
+                
+                with open(state_path, "w", encoding="utf-8") as f:
+                    json.dump(state, f, indent=2)
+        
+        # Perform maintenance tasks
+        logger.info("[Scheduler] Performing maintenance tasks...")
+        maintainer_agent.perform_maintenance()
+        
+        # After execution, send status report
+        send_status_report()
+        
+    except Exception as e:
+        logger.error(f"[Scheduler] Error in daily job: {e}\n{traceback.format_exc()}")
 
 def send_status_report():
     logger.info("[Scheduler] Sending daily status report.")
@@ -194,33 +286,112 @@ def smtp_connectivity_check():
 
 async def start_scheduler():
     smtp_connectivity_check()
-    # Run daily_job at UTC midnight every day
-    scheduler.add_job(daily_job, "cron", hour=0, minute=0)
+    # Run daily_job more frequently - every 6 hours instead of daily
+    scheduler.add_job(daily_job, "interval", hours=6)
+    
+    # Also add a quick check job that runs every hour to ensure activity
+    scheduler.add_job(quick_check, "interval", minutes=60)
+    
     if not getattr(scheduler, 'running', False):
         scheduler.start()
-        logger.info("Scheduler started.")
+        logger.info("Scheduler started with enhanced frequency.")
     else:
         logger.info("Scheduler already running. Skipping start().")
+    
     # One-time startup email logic (persisted in monsterrr_state.json)
     state_path = "monsterrr_state.json"
     state = {}
+    
+    # Check if state file exists and is valid
     if os.path.exists(state_path):
-        with open(state_path, "r", encoding="utf-8") as f:
-            try:
-                state = json.load(f)
-            except Exception:
-                state = {}
+        try:
+            with open(state_path, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+                if content:  # Check if file is not empty
+                    state = json.loads(content)
+                else:
+                    logger.warning("[Scheduler] State file is empty, creating new state.")
+                    state = {}
+        except json.JSONDecodeError as e:
+            logger.error(f"[Scheduler] State file is corrupted: {e}. Creating new state.")
+            state = {}
+        except Exception as e:
+            logger.error(f"[Scheduler] Error reading state file: {e}. Creating new state.")
+            state = {}
+    else:
+        logger.info("[Scheduler] No existing state file found.")
+    
+    # Check if startup email has already been sent
     if not state.get("startup_email_sent", False):
+        logger.info("[Scheduler] Sending startup email for the first time.")
         send_startup_email()
         state["startup_email_sent"] = True
-        with open(state_path, "w", encoding="utf-8") as f:
-            json.dump(state, f, indent=2)
+        state["initial_startup_time"] = datetime.utcnow().isoformat()
+        
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(state_path) if os.path.dirname(state_path) else ".", exist_ok=True)
+        
+        try:
+            with open(state_path, "w", encoding="utf-8") as f:
+                json.dump(state, f, indent=2, default=str)
+            logger.info("[Scheduler] Startup email status saved to state file.")
+        except Exception as e:
+            logger.error(f"[Scheduler] Failed to save startup email status: {e}")
+    else:
+        startup_time = state.get("initial_startup_time", "Unknown")
+        logger.info(f"[Scheduler] Startup email already sent. Initial startup time: {startup_time}")
+    
     # Keep the scheduler running indefinitely
     try:
         while True:
             await asyncio.sleep(3600)  # Check every hour
     except (KeyboardInterrupt, SystemExit):
         pass
+
+def quick_check():
+    """Quick check to ensure Monsterrr is active and performing work."""
+    logger.info("[Scheduler] Quick check - ensuring Monsterrr activity")
+    
+    try:
+        # Check if we have any repositories
+        repos = github.list_repositories()
+        logger.info(f"[Scheduler] Quick check found {len(repos)} repositories")
+        
+        # If no repositories, create one
+        if len(repos) == 0:
+            logger.info("[Scheduler] No repositories found. Creating initial repository...")
+            default_idea = {
+                "name": f"monsterrr-starter-{datetime.utcnow().strftime('%Y%m%d-%H%M')}",
+                "description": "Starter repository created by Monsterrr",
+                "tech_stack": ["Python"],
+                "roadmap": ["Initialize project", "Add basic structure"]
+            }
+            creator_agent.create_or_improve_repository(default_idea)
+            
+            # Log this action
+            state_path = "monsterrr_state.json"
+            if os.path.exists(state_path):
+                with open(state_path, "r", encoding="utf-8") as f:
+                    try:
+                        state = json.load(f)
+                    except Exception:
+                        state = {}
+                
+                actions = state.get("actions", [])
+                actions.append({
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "type": "starter_repo_created",
+                    "details": {
+                        "repo_name": default_idea["name"]
+                    }
+                })
+                state["actions"] = actions
+                
+                with open(state_path, "w", encoding="utf-8") as f:
+                    json.dump(state, f, indent=2)
+                    
+    except Exception as e:
+        logger.error(f"[Scheduler] Error in quick check: {e}")
 
 if __name__ == "__main__":
     asyncio.run(start_scheduler())

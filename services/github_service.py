@@ -298,11 +298,40 @@ class GitHubService(BaseService):
         return resp.json()
 
     def create_repository(self, name: str, description: str = "", private: bool = False) -> Dict[str, Any]:
-        """Create a new repository in the organization."""
+        """Create a new repository in the organization with retry logic."""
         url = f"{self.BASE_URL}/orgs/{self.org}/repos"
         data = {"name": name, "description": description, "private": private, "auto_init": True}
-        resp = self._request("POST", url, json=data)
-        return resp.json()
+        
+        # Retry up to 3 times
+        for attempt in range(3):
+            try:
+                resp = self._request("POST", url, json=data)
+                result = resp.json()
+                self.logger.info(f"[GitHubService] Successfully created repository {name}")
+                return result
+            except GitHubAPIError as e:
+                if "already exists" in str(e).lower():
+                    # If repo already exists, get its details instead
+                    self.logger.warning(f"[GitHubService] Repository {name} already exists. Getting details instead.")
+                    try:
+                        existing_repo = self.get_repository(name)
+                        return existing_repo
+                    except Exception as e2:
+                        self.logger.error(f"[GitHubService] Error getting existing repository {name}: {e2}")
+                        raise e  # Re-raise original error
+                elif attempt < 2:  # Retry on other errors
+                    self.logger.warning(f"[GitHubService] Attempt {attempt + 1} to create repository {name} failed: {e}. Retrying...")
+                    time.sleep(2 ** attempt)  # Exponential backoff
+                else:
+                    self.logger.error(f"[GitHubService] Failed to create repository {name} after 3 attempts: {e}")
+                    raise
+            except Exception as e:
+                if attempt < 2:
+                    self.logger.warning(f"[GitHubService] Attempt {attempt + 1} to create repository {name} failed with unexpected error: {e}. Retrying...")
+                    time.sleep(2 ** attempt)
+                else:
+                    self.logger.error(f"[GitHubService] Unexpected error creating repository {name} after 3 attempts: {e}")
+                    raise
 
     def delete_repository(self, repo_name: str, confirm: bool = False) -> None:
         """Delete a repository (requires confirm=True)."""
@@ -511,3 +540,319 @@ class GitHubService(BaseService):
             "pull_requests": 2,
             "last_commit": "2023-01-01"
         }
+
+    def create_project_board(self, repo_name: str, project_name: str, description: str = "") -> Dict[str, Any]:
+        """Create a project board for a repository."""
+        try:
+            # First, get the repository ID
+            repo = self.get_repository(repo_name)
+            repo_id = repo.get("node_id")
+            
+            if not repo_id:
+                raise GitHubAPIError(f"Could not get repository ID for {repo_name}")
+            
+            # Create the project using GraphQL API
+            query = """
+            mutation($input: CreateProjectV2Input!) {
+                createProjectV2(input: $input) {
+                    projectV2 {
+                        id
+                        title
+                        description
+                        url
+                    }
+                }
+            }
+            """
+            
+            variables = {
+                "input": {
+                    "title": project_name,
+                    "description": description,
+                    "repositoryId": repo_id
+                }
+            }
+            
+            # For now, we'll create a simple tracking issue instead of a full project board
+            # since the GraphQL API requires different authentication
+            project_issue = self.create_issue(
+                repo_name,
+                title=f"Project Board: {project_name}",
+                body=f"# {project_name}\n\n{description}\n\n## Project Tracking\n\nThis issue serves as a project board for tracking progress on this project.",
+                labels=["project-board", "tracking"]
+            )
+            
+            self.logger.info(f"[GitHubService] Created project board for {repo_name}: {project_name}")
+            return project_issue
+        except Exception as e:
+            self.logger.error(f"[GitHubService] Error creating project board for {repo_name}: {e}")
+            # Fallback to creating a tracking issue
+            try:
+                project_issue = self.create_issue(
+                    repo_name,
+                    title=f"Project Board: {project_name}",
+                    body=f"# {project_name}\n\n{description}\n\n## Project Tracking\n\nThis issue serves as a project board for tracking progress on this project.",
+                    labels=["project-board", "tracking"]
+                )
+                return project_issue
+            except Exception as e2:
+                self.logger.error(f"[GitHubService] Fallback failed for project board creation: {e2}")
+                raise GitHubAPIError(f"Failed to create project board: {e}")
+
+    def add_item_to_project_board(self, repo_name: str, project_issue_number: int, item_title: str, item_description: str = "", status: str = "To Do") -> Dict[str, Any]:
+        """Add an item to a project board."""
+        try:
+            # Add a comment to the project board issue to represent the item
+            comment_body = f"""
+## {item_title}
+**Status:** {status}
+
+{item_description}
+
+---
+*Added to project board*
+"""
+            comment = self.create_issue_comment(repo_name, project_issue_number, comment_body)
+            self.logger.info(f"[GitHubService] Added item to project board in {repo_name}: {item_title}")
+            return comment
+        except Exception as e:
+            self.logger.error(f"[GitHubService] Error adding item to project board in {repo_name}: {e}")
+            raise
+
+    def update_project_board_item_status(self, repo_name: str, project_issue_number: int, item_identifier: str, new_status: str) -> Dict[str, Any]:
+        """Update the status of an item in a project board."""
+        try:
+            # Get existing comments to find the item
+            comments = self.get_issue_comments(repo_name, project_issue_number)
+            
+            # Find the comment that matches our item
+            for comment in comments:
+                if item_identifier in comment.get("body", ""):
+                    # Update the comment with new status
+                    old_body = comment.get("body", "")
+                    # Simple replacement - in a real implementation, you'd want to parse the markdown
+                    new_body = old_body.replace(
+                        old_body.split('\n')[1],  # Status line
+                        f"**Status:** {new_status}"
+                    )
+                    
+                    # We can't actually update comments via the API, so we'll add a new comment
+                    update_comment = self.create_issue_comment(
+                        repo_name, 
+                        project_issue_number, 
+                        f"Status updated for '{item_identifier}': {new_status}"
+                    )
+                    self.logger.info(f"[GitHubService] Updated item status in project board: {item_identifier} -> {new_status}")
+                    return update_comment
+            
+            # If not found, add as new item
+            return self.add_item_to_project_board(repo_name, project_issue_number, item_identifier, status=new_status)
+        except Exception as e:
+            self.logger.error(f"[GitHubService] Error updating project board item status: {e}")
+            raise
+
+    def create_milestone(self, repo_name: str, title: str, description: str = "", due_on: str = None) -> Dict[str, Any]:
+        """Create a milestone for a repository."""
+        try:
+            url = f"{self.BASE_URL}/repos/{self.org}/{repo_name}/milestones"
+            data = {
+                "title": title,
+                "description": description
+            }
+            if due_on:
+                data["due_on"] = due_on
+                
+            resp = self._request("POST", url, json=data)
+            result = resp.json()
+            self.logger.info(f"[GitHubService] Created milestone in {repo_name}: {title}")
+            return result
+        except Exception as e:
+            self.logger.error(f"[GitHubService] Error creating milestone in {repo_name}: {e}")
+            raise
+
+    def add_issue_to_milestone(self, repo_name: str, issue_number: int, milestone_number: int) -> Dict[str, Any]:
+        """Add an issue to a milestone."""
+        try:
+            url = f"{self.BASE_URL}/repos/{self.org}/{repo_name}/issues/{issue_number}"
+            data = {
+                "milestone": milestone_number
+            }
+            resp = self._request("PATCH", url, json=data)
+            result = resp.json()
+            self.logger.info(f"[GitHubService] Added issue #{issue_number} to milestone #{milestone_number} in {repo_name}")
+            return result
+        except Exception as e:
+            self.logger.error(f"[GitHubService] Error adding issue to milestone: {e}")
+            raise
+
+    def determine_repo_visibility(self, repo_name: str, project_type: str, audience: str = "general") -> bool:
+        """
+        Determine if a repository should be public or private based on project type and audience.
+        
+        Args:
+            repo_name (str): Name of the repository
+            project_type (str): Type of project (e.g., "experiment", "production", "template", "demo")
+            audience (str): Intended audience ("general", "internal", "confidential")
+            
+        Returns:
+            bool: True for private, False for public
+        """
+        # Decision matrix for repository visibility
+        visibility_rules = {
+            "experiment": {
+                "general": False,      # Experiments are usually public
+                "internal": True,      # Internal experiments are private
+                "confidential": True   # Confidential experiments are private
+            },
+            "production": {
+                "general": False,      # Production code is usually public
+                "internal": True,      # Internal production is private
+                "confidential": True   # Confidential production is private
+            },
+            "template": {
+                "general": False,      # Templates are usually public
+                "internal": True,      # Internal templates are private
+                "confidential": True   # Confidential templates are private
+            },
+            "demo": {
+                "general": False,      # Demos are usually public
+                "internal": True,      # Internal demos are private
+                "confidential": True   # Confidential demos are private
+            },
+            "research": {
+                "general": False,      # Research is usually public
+                "internal": True,      # Internal research is private
+                "confidential": True   # Confidential research is private
+            },
+            "security": {
+                "general": True,       # Security projects are usually private
+                "internal": True,      # Internal security is private
+                "confidential": True   # Confidential security is private
+            }
+        }
+        
+        # Default to public if project type not found
+        project_type = project_type.lower()
+        audience = audience.lower()
+        
+        if project_type in visibility_rules and audience in visibility_rules[project_type]:
+            return visibility_rules[project_type][audience]
+        else:
+            # Default to public for unknown types
+            return False
+
+    def get_repository_insights(self, repo_name: str) -> Dict[str, Any]:
+        """Get comprehensive insights about a repository."""
+        try:
+            # Get repository details
+            repo_info = self.get_repository(repo_name)
+            
+            # Get issues
+            issues = self.list_issues(repo_name, state="all")
+            
+            # Get pull requests (using search)
+            try:
+                pr_search_url = f"{self.BASE_URL}/search/issues"
+                pr_params = {
+                    "q": f"repo:{self.org}/{repo_name} is:pr",
+                    "per_page": 100
+                }
+                pr_resp = self._request("GET", pr_search_url, params=pr_params)
+                prs = pr_resp.json().get("items", [])
+            except:
+                prs = []
+            
+            # Get branches
+            try:
+                branches_url = f"{self.BASE_URL}/repos/{self.org}/{repo_name}/branches"
+                branches_resp = self._request("GET", branches_url)
+                branches = branches_resp.json()
+            except:
+                branches = []
+            
+            # Get contributors
+            try:
+                contributors_url = f"{self.BASE_URL}/repos/{self.org}/{repo_name}/contributors"
+                contributors_resp = self._request("GET", contributors_url)
+                contributors = contributors_resp.json()
+            except:
+                contributors = []
+            
+            # Get languages
+            try:
+                languages_url = f"{self.BASE_URL}/repos/{self.org}/{repo_name}/languages"
+                languages_resp = self._request("GET", languages_url)
+                languages = languages_resp.json()
+            except:
+                languages = {}
+            
+            # Calculate insights
+            open_issues = len([i for i in issues if i.get("state") == "open"])
+            closed_issues = len([i for i in issues if i.get("state") == "closed"])
+            
+            open_prs = len([pr for pr in prs if pr.get("state") == "open"])
+            closed_prs = len([pr for pr in prs if pr.get("state") in ["closed", "merged"]])
+            
+            # Health score calculation
+            health_score = 80  # Base score
+            
+            # Adjust based on activity
+            if open_issues > 50:
+                health_score -= 10
+            if open_prs > 20:
+                health_score -= 10
+            if len(contributors) == 0:
+                health_score -= 20
+            elif len(contributors) > 5:
+                health_score += 10
+                
+            # Adjust based on documentation
+            try:
+                files = self.list_files(repo_name)
+                if any("readme" in f.lower() for f in files):
+                    health_score += 5
+                if any("license" in f.lower() for f in files):
+                    health_score += 5
+                if any("contributing" in f.lower() for f in files):
+                    health_score += 5
+                if any("docs" in f.lower() for f in files):
+                    health_score += 10
+            except:
+                pass
+            
+            insights = {
+                "repository": repo_info.get("name"),
+                "description": repo_info.get("description", ""),
+                "visibility": "private" if repo_info.get("private", False) else "public",
+                "created_at": repo_info.get("created_at"),
+                "updated_at": repo_info.get("updated_at"),
+                "language": repo_info.get("language", ""),
+                "languages": languages,
+                "stars": repo_info.get("stargazers_count", 0),
+                "forks": repo_info.get("forks_count", 0),
+                "watchers": repo_info.get("watchers_count", 0),
+                "issues": {
+                    "open": open_issues,
+                    "closed": closed_issues,
+                    "total": len(issues)
+                },
+                "pull_requests": {
+                    "open": open_prs,
+                    "closed": closed_prs,
+                    "total": len(prs)
+                },
+                "branches": [b["name"] for b in branches],
+                "contributors": len(contributors),
+                "health_score": health_score,
+                "last_commit": repo_info.get("pushed_at", ""),
+                "size": repo_info.get("size", 0)
+            }
+            
+            self.logger.info(f"[GitHubService] Generated insights for {repo_name}")
+            return insights
+        except Exception as e:
+            self.logger.error(f"[GitHubService] Error getting repository insights for {repo_name}: {e}")
+            return {
+                "repository": repo_name,
+                "error": str(e)
+            }

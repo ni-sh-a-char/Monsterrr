@@ -103,22 +103,29 @@ async def healthz():
     return {"status": "healthy", "timestamp": time.time()}
 
 def watchdog():
+    """Enhanced watchdog that monitors health without restarting."""
+    logger.info("[Main] Watchdog monitoring started - will not restart application")
+    
     while True:
-        time.sleep(60)
-        # Check health, restart if needed
+        time.sleep(300)  # Check every 5 minutes
+        # Check health but don't restart
         try:
             PORT = os.environ.get("PORT", 8000)
-            r = requests.get(f"http://localhost:{PORT}/health")
-            if r.status_code != 200:
-                logger.error("Health check failed, restarting...")
-                os.execv(sys.executable, ['python'] + sys.argv)
+            r = requests.get(f"http://localhost:{PORT}/health", timeout=10)
+            if r.status_code == 200:
+                logger.debug("[Main] Health check passed.")
+            else:
+                logger.warning(f"[Main] Health check failed: Status code {r.status_code}")
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"[Main] Health check network error: {e}")
         except Exception as e:
-            logger.error(f"Watchdog error: {e}")
-            os.execv(sys.executable, ['python'] + sys.argv)
+            logger.error(f"[Main] Unexpected error in watchdog: {e}")
 
 def start_watchdog():
+    """Start the enhanced watchdog."""
     t = threading.Thread(target=watchdog, daemon=True)
     t.start()
+    logger.info("[Main] Enhanced watchdog started")
 
 @app.on_event("startup")
 async def launch_scheduler():

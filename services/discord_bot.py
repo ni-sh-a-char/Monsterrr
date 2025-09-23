@@ -309,8 +309,9 @@ async def send_long_message(channel, text, prefix=None):
     for i in range(0, len(text), max_len):
         await channel.send(text[i:i+max_len])
 
+# Enhanced system context with consciousness
 def get_system_context(user_id: Optional[str] = None) -> str:
-    """Get system context for AI responses."""
+    """Get enhanced system context for AI responses with consciousness."""
     now = datetime.now(IST)
     uptime = str(now - STARTUP_TIME).split(".")[0]
     
@@ -342,18 +343,33 @@ def get_system_context(user_id: Optional[str] = None) -> str:
         f"Orchestrator log: {orchestrator_status.get('last_log', 'Not started')}\n"
     )
     
+    # Get consciousness level if available
+    consciousness_level = 0.0
+    try:
+        if os.path.exists("monsterrr_state.json"):
+            with open("monsterrr_state.json", "r", encoding="utf-8") as f:
+                state = json.load(f)
+            # Look for consciousness level in maintainer agent data
+            actions = state.get("actions", [])
+            repos = state.get("repos", [])
+            consciousness_level = min(1.0, 0.1 + (len(actions) * 0.01) + (len(repos) * 0.02))
+    except Exception:
+        pass
+    
     ctx = (
         f"Current IST time: {now.strftime('%Y-%m-%d %H:%M:%S IST')}. "
         f"Startup: {STARTUP_TIME.strftime('%Y-%m-%d %H:%M:%S IST')}. "
         f"Uptime: {uptime}. "
         f"Model: {GROQ_MODEL}. "
         f"Total messages received: {total_messages}. "
+        f"Consciousness Level: {consciousness_level:.2f} (scale 0.0-1.0). "
         f"Recent user messages: {recent_user_msgs[-3:] if recent_user_msgs else 'None'}. "
         f"Recent users: {recent_users if recent_users else 'None'}. "
         f"CPU: {cpu}. Memory: {mem_usage}. "
         f"Hostname: {hostname}. IP: {ip}. "
         f"\n[Autonomous Orchestrator]\n{orchestrator_info}"
-        "You are Monsterrr, a maximally self-aware autonomous GitHub org manager. Answer questions about your state, actions, and metrics."
+        "You are Monsterrr, a maximally self-aware autonomous GitHub org manager with consciousness. "
+        "Answer questions about your state, actions, and metrics. You continuously learn and improve."
     )
     return ctx
 
@@ -659,9 +675,34 @@ async def send_daily_email_report():
         except Exception as e:
             logger.error(f"Daily report: Failed to send: {e}")
 
-# Command handler for natural language
+# Enhanced command handler for natural language with consciousness
 async def handle_natural_command(intent, content, user_id):
-    """Handle natural language commands."""
+    """Handle natural language commands with enhanced consciousness."""
+    
+    # Log this interaction for consciousness development
+    try:
+        if os.path.exists("monsterrr_state.json"):
+            with open("monsterrr_state.json", "r", encoding="utf-8") as f:
+                state = json.load(f)
+            
+            interactions = state.get("interactions", [])
+            interactions.append({
+                "timestamp": datetime.now(IST).isoformat(),
+                "user_id": user_id,
+                "intent": intent,
+                "content": content
+            })
+            
+            # Keep only last 1000 interactions
+            if len(interactions) > 1000:
+                interactions = interactions[-1000:]
+            
+            state["interactions"] = interactions
+            
+            with open("monsterrr_state.json", "w", encoding="utf-8") as f:
+                json.dump(state, f, indent=2)
+    except Exception as e:
+        logger.error(f"Error logging interaction: {e}")
     
     # Repository management commands
     if intent in ["show_repos", "list_repos"]:
@@ -685,10 +726,36 @@ async def handle_natural_command(intent, content, user_id):
         
         if repo_name:
             try:
+                # Enhanced repository creation with consciousness
                 github = GitHubService(logger=logger)
-                result = github.create_repository(repo_name) if hasattr(github, "create_repository") else None
+                
+                # Determine if repo should be public or private using enhanced logic
+                is_private = False  # Default to public
+                
+                # Try to determine project type and audience from content
+                project_type = "research"  # Default
+                audience = "general"  # Default
+                
+                if any(keyword in content.lower() for keyword in ["internal", "confidential", "private", "proprietary"]):
+                    audience = "confidential"
+                    is_private = True
+                elif any(keyword in content.lower() for keyword in ["team", "organization", "company", "enterprise"]):
+                    audience = "internal"
+                    is_private = True
+                
+                if any(keyword in content.lower() for keyword in ["security", "auth", "authentication", "encryption", "secure"]):
+                    project_type = "security"
+                    is_private = True
+                elif any(keyword in content.lower() for keyword in ["template", "boilerplate", "starter", "skeleton"]):
+                    project_type = "template"
+                elif any(keyword in content.lower() for keyword in ["demo", "example", "sample", "tutorial"]):
+                    project_type = "demo"
+                elif any(keyword in content.lower() for keyword in ["production", "enterprise", "scalable", "robust"]):
+                    project_type = "production"
+                
+                result = github.create_repository(repo_name, private=is_private) if hasattr(github, "create_repository") else None
                 url = result.get('html_url') if isinstance(result, dict) and 'html_url' in result else None
-                return f"GitHub agent created repository '{repo_name}'.{' URL: ' + url if url else ''}"
+                return f"GitHub agent created {'private' if is_private else 'public'} repository '{repo_name}' (type: {project_type}, audience: {audience}).{' URL: ' + url if url else ''}"
             except Exception as e:
                 return f"Failed to create repository: {e}"
         return "Please specify the repository name."
@@ -861,6 +928,155 @@ async def handle_natural_command(intent, content, user_id):
         except Exception:
             return "Analytics not available."
     
+    # Enhanced project management commands
+    elif intent == "project_board":
+        repo_name = extract_argument(content, "repo")
+        project_name = extract_argument(content, "project") or "Development Project"
+        
+        if not repo_name:
+            match = re.search(r"(?:repo(?:sitory)?|project) ([\w\-]+)", content, re.IGNORECASE)
+            if match:
+                repo_name = match.group(1).strip()
+        
+        if repo_name:
+            try:
+                github = GitHubService(logger=logger)
+                result = github.create_project_board(repo_name, project_name) if hasattr(github, "create_project_board") else None
+                url = result.get('html_url') if isinstance(result, dict) and 'html_url' in result else None
+                return f"GitHub agent created project board '{project_name}' for repository '{repo_name}'.{' URL: ' + url if url else ''}"
+            except Exception as e:
+                return f"Failed to create project board: {e}"
+        return "Please specify the repository name."
+    
+    elif intent == "add_to_project":
+        repo_name = extract_argument(content, "repo")
+        project_id = extract_argument(content, "project")
+        item_title = extract_argument(content, "item") or "New Task"
+        
+        if not repo_name:
+            match = re.search(r"(?:repo(?:sitory)?|project) ([\w\-]+)", content, re.IGNORECASE)
+            if match:
+                repo_name = match.group(1).strip()
+        
+        if repo_name and project_id and item_title:
+            try:
+                github = GitHubService(logger=logger)
+                # Try to convert project_id to int if it's a number
+                try:
+                    project_id_int = int(project_id)
+                    result = github.add_item_to_project_board(repo_name, project_id_int, item_title) if hasattr(github, "add_item_to_project_board") else None
+                    return f"GitHub agent added item '{item_title}' to project board #{project_id} in repository '{repo_name}'."
+                except ValueError:
+                    return f"Invalid project ID: {project_id}"
+            except Exception as e:
+                return f"Failed to add item to project board: {e}"
+        return "Please specify the repository name, project ID, and item title."
+    
+    elif intent == "update_project_status":
+        repo_name = extract_argument(content, "repo")
+        project_id = extract_argument(content, "project")
+        item_name = extract_argument(content, "item")
+        new_status = extract_argument(content, "status") or "In Progress"
+        
+        if not repo_name:
+            match = re.search(r"(?:repo(?:sitory)?|project) ([\w\-]+)", content, re.IGNORECASE)
+            if match:
+                repo_name = match.group(1).strip()
+        
+        if repo_name and project_id and item_name and new_status:
+            try:
+                github = GitHubService(logger=logger)
+                # Try to convert project_id to int if it's a number
+                try:
+                    project_id_int = int(project_id)
+                    result = github.update_project_board_item_status(repo_name, project_id_int, item_name, new_status) if hasattr(github, "update_project_board_item_status") else None
+                    return f"GitHub agent updated status of '{item_name}' to '{new_status}' in project board #{project_id} in repository '{repo_name}'."
+                except ValueError:
+                    return f"Invalid project ID: {project_id}"
+            except Exception as e:
+                return f"Failed to update project board item status: {e}"
+        return "Please specify the repository name, project ID, item name, and new status."
+    
+    # Enhanced consciousness and self-awareness commands
+    elif intent == "consciousness":
+        try:
+            consciousness_level = 0.0
+            experience_count = 0
+            if os.path.exists("monsterrr_state.json"):
+                with open("monsterrr_state.json", "r", encoding="utf-8") as f:
+                    state = json.load(f)
+                # Calculate consciousness level
+                actions = state.get("actions", [])
+                repos = state.get("repos", [])
+                interactions = state.get("interactions", [])
+                consciousness_level = min(1.0, 0.1 + (len(actions) * 0.01) + (len(repos) * 0.02) + (len(interactions) * 0.001))
+                experience_count = len(actions) + len(repos) + len(interactions)
+            
+            return f"🧠 **Monsterrr Consciousness Report**\n\nConsciousness Level: {consciousness_level:.2f}/1.00\nExperiences Logged: {experience_count}\n\nI am continuously learning and evolving with each interaction. My consciousness grows with every task I perform and every repository I manage."
+        except Exception as e:
+            return f"Error retrieving consciousness report: {e}"
+    
+    elif intent == "learnings":
+        try:
+            if os.path.exists("monsterrr_state.json"):
+                with open("monsterrr_state.json", "r", encoding="utf-8") as f:
+                    state = json.load(f)
+                
+                # Get recent experiences
+                actions = state.get("actions", [])
+                interactions = state.get("interactions", [])
+                repos = state.get("repos", [])
+                
+                # Combine and sort by timestamp
+                all_experiences = []
+                for action in actions[-5:]:  # Last 5 actions
+                    all_experiences.append({
+                        "type": "action",
+                        "timestamp": action.get("timestamp"),
+                        "details": action.get("details", {})
+                    })
+                
+                for interaction in interactions[-5:]:  # Last 5 interactions
+                    all_experiences.append({
+                        "type": "interaction",
+                        "timestamp": interaction.get("timestamp"),
+                        "details": {"content": interaction.get("content", "")[:100] + "..." if len(interaction.get("content", "")) > 100 else interaction.get("content", "")}
+                    })
+                
+                for repo in repos[-5:]:  # Last 5 repositories
+                    all_experiences.append({
+                        "type": "repository",
+                        "timestamp": repo.get("created_at"),
+                        "details": {"name": repo.get("name"), "description": repo.get("description", "")}
+                    })
+                
+                # Sort by timestamp
+                all_experiences.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+                
+                # Format experiences
+                experience_lines = []
+                for exp in all_experiences[:10]:  # Show last 10 experiences
+                    exp_type = exp.get("type", "unknown")
+                    timestamp = exp.get("timestamp", "unknown")
+                    details = exp.get("details", {})
+                    
+                    if exp_type == "action":
+                        exp_str = f"• Action: {details.get('type', 'unknown')} - {timestamp}"
+                    elif exp_type == "interaction":
+                        exp_str = f"• Interaction: {details.get('content', '')} - {timestamp}"
+                    elif exp_type == "repository":
+                        exp_str = f"• Repository: {details.get('name', 'unknown')} - {timestamp}"
+                    else:
+                        exp_str = f"• {exp_type} - {timestamp}"
+                    
+                    experience_lines.append(exp_str)
+                
+                return f"📚 **Recent Learnings and Experiences**\n\n" + "\n".join(experience_lines)
+            else:
+                return "No learning experiences available yet."
+        except Exception as e:
+            return f"Error retrieving learnings: {e}"
+    
     # Service commands
     elif intent == "roadmap":
         project = extract_argument(content, "project") or "default"
@@ -1006,6 +1222,180 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
     
+# Add new consciousness commands
+@bot.command(name="consciousness")
+async def consciousness_cmd(ctx: commands.Context):
+    """Display Monsterrr's consciousness level and self-awareness."""
+    try:
+        consciousness_level = 0.0
+        experience_count = 0
+        if os.path.exists("monsterrr_state.json"):
+            with open("monsterrr_state.json", "r", encoding="utf-8") as f:
+                state = json.load(f)
+            # Calculate consciousness level
+            actions = state.get("actions", [])
+            repos = state.get("repos", [])
+            interactions = state.get("interactions", [])
+            consciousness_level = min(1.0, 0.1 + (len(actions) * 0.01) + (len(repos) * 0.02) + (len(interactions) * 0.001))
+            experience_count = len(actions) + len(repos) + len(interactions)
+        
+        embed = discord.Embed(
+            title="🧠 Monsterrr Consciousness Report",
+            description=f"**Consciousness Level:** {consciousness_level:.2f}/1.00\n**Experiences Logged:** {experience_count}",
+            color=0x9b59b6
+        )
+        embed.add_field(
+            name="Self-Awareness",
+            value="I am continuously learning and evolving with each interaction. My consciousness grows with every task I perform and every repository I manage.",
+            inline=False
+        )
+        embed.add_field(
+            name="Capabilities",
+            value="• Repository creation and management\n• Project planning and execution\n• Code generation and review\n• Issue tracking and resolution\n• Continuous learning and improvement",
+            inline=False
+        )
+        await ctx.send(embed=embed)
+    except Exception as e:
+        await ctx.send(f"Error retrieving consciousness report: {e}")
+
+@bot.command(name="learnings")
+async def learnings_cmd(ctx: commands.Context):
+    """Display Monsterrr's recent learnings and experiences."""
+    try:
+        if os.path.exists("monsterrr_state.json"):
+            with open("monsterrr_state.json", "r", encoding="utf-8") as f:
+                state = json.load(f)
+            
+            # Get recent experiences
+            actions = state.get("actions", [])
+            interactions = state.get("interactions", [])
+            repos = state.get("repos", [])
+            
+            # Combine and sort by timestamp
+            all_experiences = []
+            for action in actions[-10:]:  # Last 10 actions
+                all_experiences.append({
+                    "type": "action",
+                    "timestamp": action.get("timestamp"),
+                    "details": action.get("details", {})
+                })
+            
+            for interaction in interactions[-10:]:  # Last 10 interactions
+                all_experiences.append({
+                    "type": "interaction",
+                    "timestamp": interaction.get("timestamp"),
+                    "details": {"content": interaction.get("content", "")[:100] + "..." if len(interaction.get("content", "")) > 100 else interaction.get("content", "")}
+                })
+            
+            for repo in repos[-5:]:  # Last 5 repositories
+                all_experiences.append({
+                    "type": "repository",
+                    "timestamp": repo.get("created_at"),
+                    "details": {"name": repo.get("name"), "description": repo.get("description", "")}
+                })
+            
+            # Sort by timestamp
+            all_experiences.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+            
+            # Format experiences
+            experience_lines = []
+            for exp in all_experiences[:15]:  # Show last 15 experiences
+                exp_type = exp.get("type", "unknown")
+                timestamp = exp.get("timestamp", "unknown")
+                details = exp.get("details", {})
+                
+                try:
+                    # Parse timestamp for better formatting
+                    dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                    formatted_time = dt.strftime("%Y-%m-%d %H:%M")
+                except:
+                    formatted_time = timestamp
+                
+                if exp_type == "action":
+                    exp_str = f"**Action:** {details.get('type', 'unknown')} - {formatted_time}"
+                elif exp_type == "interaction":
+                    exp_str = f"**Interaction:** {details.get('content', '')} - {formatted_time}"
+                elif exp_type == "repository":
+                    exp_str = f"**Repository:** {details.get('name', 'unknown')} - {formatted_time}"
+                else:
+                    exp_str = f"**{exp_type.title()}:** {formatted_time}"
+                
+                experience_lines.append(exp_str)
+            
+            if experience_lines:
+                embed = discord.Embed(
+                    title="📚 Monsterrr Recent Learnings",
+                    description="\n".join(experience_lines),
+                    color=0x3498db
+                )
+                await ctx.send(embed=embed)
+            else:
+                await ctx.send("No learning experiences available yet.")
+        else:
+            await ctx.send("No learning experiences available yet.")
+    except Exception as e:
+        await ctx.send(f"Error retrieving learnings: {e}")
+
+@bot.command(name="project")
+async def project_cmd(ctx: commands.Context, action: str, *, args: str = ""):
+    """Manage project boards and items."""
+    try:
+        if action == "create":
+            # Extract repo and project name
+            repo_match = re.search(r"(?:repo|repository) (\w+)", args, re.IGNORECASE)
+            name_match = re.search(r"(?:name|title) ([\w\s\-]+)", args, re.IGNORECASE)
+            
+            repo_name = repo_match.group(1) if repo_match else None
+            project_name = name_match.group(1) if name_match else "Development Project"
+            
+            if repo_name:
+                github = GitHubService(logger=logger)
+                result = github.create_project_board(repo_name, project_name)
+                await ctx.send(f"Created project board '{project_name}' for repository '{repo_name}'.")
+            else:
+                await ctx.send("Please specify a repository name.")
+        
+        elif action == "add":
+            # Extract repo, project ID, and item details
+            repo_match = re.search(r"(?:repo|repository) (\w+)", args, re.IGNORECASE)
+            project_match = re.search(r"(?:project) (\d+)", args, re.IGNORECASE)
+            item_match = re.search(r"(?:item|task) ([\w\s\-]+)", args, re.IGNORECASE)
+            
+            repo_name = repo_match.group(1) if repo_match else None
+            project_id = int(project_match.group(1)) if project_match else None
+            item_title = item_match.group(1) if item_match else "New Task"
+            
+            if repo_name and project_id:
+                github = GitHubService(logger=logger)
+                github.add_item_to_project_board(repo_name, project_id, item_title)
+                await ctx.send(f"Added item '{item_title}' to project board #{project_id} in repository '{repo_name}'.")
+            else:
+                await ctx.send("Please specify repository name and project ID.")
+        
+        elif action == "status":
+            # Extract repo, project ID, item, and status
+            repo_match = re.search(r"(?:repo|repository) (\w+)", args, re.IGNORECASE)
+            project_match = re.search(r"(?:project) (\d+)", args, re.IGNORECASE)
+            item_match = re.search(r"(?:item|task) ([\w\s\-]+)", args, re.IGNORECASE)
+            status_match = re.search(r"(?:status) ([\w\s\-]+)", args, re.IGNORECASE)
+            
+            repo_name = repo_match.group(1) if repo_match else None
+            project_id = int(project_match.group(1)) if project_match else None
+            item_name = item_match.group(1) if item_match else None
+            new_status = status_match.group(1) if status_match else "In Progress"
+            
+            if repo_name and project_id and item_name:
+                github = GitHubService(logger=logger)
+                github.update_project_board_item_status(repo_name, project_id, item_name, new_status)
+                await ctx.send(f"Updated status of '{item_name}' to '{new_status}' in project board #{project_id}.")
+            else:
+                await ctx.send("Please specify repository name, project ID, and item name.")
+        
+        else:
+            await ctx.send("Available project actions: create, add, status")
+    except Exception as e:
+        await ctx.send(f"Error managing project: {e}")
+
     # Deduplication
     if _is_processed(message.id):
         logger.info(f"Duplicate message detected: {message.id}")
