@@ -717,7 +717,15 @@ async def handle_natural_command(intent, content, user_id):
         except Exception as e:
             return f"Failed to list repositories: {e}"
     
+    elif intent in ["improve_cmd", "maintain_cmd"]:
+        # These commands require specific parameters, so we'll provide guidance
+        if intent == "improve_cmd":
+            return "To improve a repository, please specify which repository. For example: 'improve my-repo-name' or 'enhance my-project'"
+        else:  # maintain_cmd
+            return "To perform maintenance, you can use the maintain command. For example: 'maintain' or 'perform maintenance'"
+    
     elif intent == "create_repo":
+        # Check if repository name is provided in the content
         repo_name = extract_argument(content, "repo")
         if not repo_name:
             match = re.search(r"(?:create|add|new) (?:repo(?:sitory)?|project) (?:called |named )?([a-zA-Z0-9\-_]+)", content, re.IGNORECASE)
@@ -758,7 +766,7 @@ async def handle_natural_command(intent, content, user_id):
                 return f"GitHub agent created {'private' if is_private else 'public'} repository '{repo_name}' (type: {project_type}, audience: {audience}).{' URL: ' + url if url else ''}"
             except Exception as e:
                 return f"Failed to create repository: {e}"
-        return "Please specify the repository name."
+        return "Please specify the repository name. For example: 'create repo my-new-project' or 'create a new repository called my-project'"
     
     elif intent == "delete_repo":
         repo_name = extract_argument(content, "repo")
@@ -898,9 +906,41 @@ async def handle_natural_command(intent, content, user_id):
                 idea_list = "\n".join(f"- **{i.get('name','')}**: {i.get('description','')}" for i in ideas)
                 return f"**Top Ideas:**\n{idea_list}"
             else:
-                return "No ideas found."
+                # Try to generate new ideas if none are found
+                try:
+                    from agents.idea_agent import IdeaGeneratorAgent
+                    idea_agent = IdeaGeneratorAgent(groq_service, logger)
+                    new_ideas = idea_agent.fetch_and_rank_ideas(top_n=5)
+                    if new_ideas:
+                        # Save to state
+                        state["ideas"] = {"top_ideas": new_ideas}
+                        with open("monsterrr_state.json", "w", encoding="utf-8") as f:
+                            json.dump(state, f, indent=2)
+                        
+                        idea_list = "\n".join(f"- **{i.get('name','')}**: {i.get('description','')}" for i in new_ideas)
+                        return f"**Top Ideas:**\n{idea_list}"
+                    else:
+                        return "No ideas found."
+                except Exception:
+                    return "No ideas found."
         except Exception:
-            return "No ideas available."
+            # Try to generate new ideas if state file doesn't exist or has issues
+            try:
+                from agents.idea_agent import IdeaGeneratorAgent
+                idea_agent = IdeaGeneratorAgent(groq_service, logger)
+                new_ideas = idea_agent.fetch_and_rank_ideas(top_n=5)
+                if new_ideas:
+                    # Create state file with ideas
+                    state = {"ideas": {"top_ideas": new_ideas}}
+                    with open("monsterrr_state.json", "w", encoding="utf-8") as f:
+                        json.dump(state, f, indent=2)
+                    
+                    idea_list = "\n".join(f"- **{i.get('name','')}**: {i.get('description','')}" for i in new_ideas)
+                    return f"**Top Ideas:**\n{idea_list}"
+                else:
+                    return "No ideas found."
+            except Exception:
+                return "No ideas available."
     
     elif intent == "show_tasks":
         try:
@@ -1400,165 +1440,163 @@ async def on_message(message: discord.Message):
     # Process commands first
     await bot.process_commands(message)
     
-    # Only process non-command messages (messages that don't start with !)
-    if not message.content.startswith('!') and message.channel.id == int(CHANNEL_ID) if CHANNEL_ID else True:
-        # Show typing indicator while processing
-        async with message.channel.typing():
-            global total_messages
-            total_messages += 1
-            unique_users.add(str(message.author.id))
-            
-            # Deduplication check
-            if _is_processed(message.id):
+    # Show typing indicator while processing all messages
+    async with message.channel.typing():
+        global total_messages
+        total_messages += 1
+        unique_users.add(str(message.author.id))
+        
+        # Deduplication check
+        if _is_processed(message.id):
+            return
+        _mark_processed(message.id)
+        
+        content = message.content.strip()
+        user_id = str(message.author.id)
+        
+        # Store in conversation memory
+        conversation_memory[user_id].append({"role": "user", "content": content})
+        
+        # Enhanced system context with current state awareness
+        system_ctx = get_system_context(user_id)
+        
+        # First check if this is a command by looking for command keywords
+        # Even without "!" prefix, we should recognize commands
+        command_intents = [
+            ("status", "show_status"), ("system status", "show_status"), ("current status", "show_status"),
+            ("guide", "guide_cmd"), ("help", "guide_cmd"), ("ideas", "show_ideas"), ("repos", "show_repos"),
+            ("show repos", "show_repos"), ("list repos", "show_repos"), ("roadmap", "roadmap"),
+            ("tasks", "show_tasks"), ("analytics", "show_analytics"), ("scan", "scan_repo"),
+            ("review", "review_pr"), ("docs", "show_docs"), ("integrate", "integrate_platform"),
+            ("qa", "run_qa"), ("close", "close_issue"), ("assign", "assign_task"), ("search", "search_cmd"),
+            ("alerts", "alerts_cmd"), ("notify", "notify_cmd"), ("codereview", "codereview_cmd"),
+            ("buildcmd", "buildcmd_cmd"), ("onboard", "onboard_cmd"), ("merge", "merge_cmd"),
+            ("language", "language_cmd"), ("triage", "triage_cmd"), ("poll", "poll_cmd"),
+            ("report", "report_cmd"), ("recognize", "recognize_cmd"), ("create", "create_repo"),
+            ("delete", "delete_repo"), ("add", "add_repo"), ("show", "show_repos"), ("list", "show_repos"),
+            ("brainstorm", "brainstorm_cmd"), ("plan", "plan_cmd"), ("execute", "execute_cmd"),
+            ("improve", "improve_cmd"), ("maintain", "maintain_cmd"), ("enhance", "improve_cmd"),
+            ("upgrade", "improve_cmd"), ("update", "improve_cmd"), ("contribute", "plan_cmd"),
+            ("work", "execute_cmd"), ("build", "create_repo"), ("make", "create_repo"),
+            ("fix", "maintain_cmd"), ("repair", "maintain_cmd"), ("refactor", "improve_cmd"),
+            ("what can you do", "guide_cmd"), ("what are you", "guide_cmd"), ("who are you", "guide_cmd"),
+            ("tell me about", "status_cmd"), ("what's happening", "status_cmd"), ("what's up", "status_cmd"),
+            ("how are you", "status_cmd"), ("organization status", "status_cmd"), ("org status", "status_cmd"),
+            ("github status", "status_cmd"), ("project status", "status_cmd"), ("repo status", "status_cmd"),
+            ("consciousness", "consciousness"), ("learnings", "learnings"), ("project", "project_board")
+        ]
+        
+        intent = None
+        intent_type = 'query'
+        
+        # Check for command keywords in the message
+        for kw, cmd in command_intents:
+            if kw in content.lower():
+                intent = cmd
+                intent_type = 'command'
+                break
+        
+        # URL detection for web search
+        url_pattern = re.compile(r"https?://\S+", re.IGNORECASE)
+        found_urls = url_pattern.findall(content)
+        
+        try:
+            # Handle different message types
+            if intent_type == 'command' and intent:
+                # Handle natural language commands
+                reply = await handle_natural_command(intent, content, user_id)
+                conversation_memory[user_id].append({"role": "assistant", "content": reply})
+                try:
+                    embed = create_professional_embed("Monsterrr Command Result", reply)
+                    await message.channel.send(embed=embed)
+                except Exception:
+                    await send_long_message(message.channel, reply)
                 return
-            _mark_processed(message.id)
             
-            content = message.content.strip()
-            user_id = str(message.author.id)
-            
-            # Store in conversation memory
-            conversation_memory[user_id].append({"role": "user", "content": content})
-            
-            # Enhanced system context with current state awareness
-            system_ctx = get_system_context(user_id)
-            
-            # First check if this is a command by looking for command keywords
-            # Even without "!" prefix, we should recognize commands
-            command_intents = [
-                ("status", "show_status"), ("system status", "show_status"), ("current status", "show_status"),
-                ("guide", "guide_cmd"), ("help", "guide_cmd"), ("ideas", "show_ideas"), ("repos", "show_repos"),
-                ("show repos", "show_repos"), ("list repos", "show_repos"), ("roadmap", "roadmap"),
-                ("tasks", "show_tasks"), ("analytics", "show_analytics"), ("scan", "scan_repo"),
-                ("review", "review_pr"), ("docs", "show_docs"), ("integrate", "integrate_platform"),
-                ("qa", "run_qa"), ("close", "close_issue"), ("assign", "assign_task"), ("search", "search_cmd"),
-                ("alerts", "alerts_cmd"), ("notify", "notify_cmd"), ("codereview", "codereview_cmd"),
-                ("buildcmd", "buildcmd_cmd"), ("onboard", "onboard_cmd"), ("merge", "merge_cmd"),
-                ("language", "language_cmd"), ("triage", "triage_cmd"), ("poll", "poll_cmd"),
-                ("report", "report_cmd"), ("recognize", "recognize_cmd"), ("create", "create_repo"),
-                ("delete", "delete_repo"), ("add", "add_repo"), ("show", "show_repos"), ("list", "show_repos"),
-                ("brainstorm", "brainstorm_cmd"), ("plan", "plan_cmd"), ("execute", "execute_cmd"),
-                ("improve", "improve_cmd"), ("maintain", "maintain_cmd"), ("enhance", "improve_cmd"),
-                ("upgrade", "improve_cmd"), ("update", "improve_cmd"), ("contribute", "plan_cmd"),
-                ("work", "execute_cmd"), ("build", "create_repo"), ("make", "create_repo"),
-                ("fix", "maintain_cmd"), ("repair", "maintain_cmd"), ("refactor", "improve_cmd"),
-                ("what can you do", "guide_cmd"), ("what are you", "guide_cmd"), ("who are you", "guide_cmd"),
-                ("tell me about", "status_cmd"), ("what's happening", "status_cmd"), ("what's up", "status_cmd"),
-                ("how are you", "status_cmd"), ("organization status", "status_cmd"), ("org status", "status_cmd"),
-                ("github status", "status_cmd"), ("project status", "status_cmd"), ("repo status", "status_cmd"),
-                ("consciousness", "consciousness"), ("learnings", "learnings"), ("project", "project_board")
-            ]
-            
-            intent = None
-            intent_type = 'query'
-            
-            # Check for command keywords in the message
-            for kw, cmd in command_intents:
-                if kw in content.lower():
-                    intent = cmd
-                    intent_type = 'command'
-                    break
-            
-            # URL detection for web search
-            url_pattern = re.compile(r"https?://\S+", re.IGNORECASE)
-            found_urls = url_pattern.findall(content)
-            
-            try:
-                # Handle different message types
-                if intent_type == 'command' and intent:
-                    # Handle natural language commands
-                    reply = await handle_natural_command(intent, content, user_id)
-                    conversation_memory[user_id].append({"role": "assistant", "content": reply})
-                    try:
-                        embed = create_professional_embed("Monsterrr Command Result", reply)
-                        await message.channel.send(embed=embed)
-                    except Exception:
-                        await send_long_message(message.channel, reply)
-                    return
+            elif found_urls and search_service:
+                # Summarize URLs
+                url = found_urls[0]
+                try:
+                    summary = await asyncio.to_thread(search_service.summarize_url, url)
+                except Exception as e:
+                    summary = f"Sorry, I couldn't summarize the URL: {e}"
                 
-                elif found_urls and search_service:
-                    # Summarize URLs
-                    url = found_urls[0]
-                    try:
-                        summary = await asyncio.to_thread(search_service.summarize_url, url)
-                    except Exception as e:
-                        summary = f"Sorry, I couldn't summarize the URL: {e}"
+                conversation_memory[user_id].append({"role": "assistant", "content": summary})
+                try:
+                    embed = create_professional_embed("Monsterrr Web Summary", summary)
+                    await message.channel.send(embed=embed)
+                except Exception:
+                    await send_long_message(message.channel, summary)
+                return
+            
+            elif search_service and not intent:
+                # General web search for queries
+                try:
+                    result = await search_service.search_and_summarize(content)
+                    summary = result
+                    references = None
                     
-                    conversation_memory[user_id].append({"role": "assistant", "content": summary})
-                    try:
-                        embed = create_professional_embed("Monsterrr Web Summary", summary)
-                        await message.channel.send(embed=embed)
-                    except Exception:
-                        await send_long_message(message.channel, summary)
-                    return
-                
-                elif search_service and not intent:
-                    # General web search for queries
-                    try:
-                        result = await search_service.search_and_summarize(content)
-                        summary = result
-                        references = None
-                        
-                        if isinstance(result, dict):
-                            summary = result.get("summary") or result.get("answer") or ""
-                            references = result.get("references") or result.get("sources") or result.get("urls")
-                        elif isinstance(result, tuple) and len(result) == 2:
-                            summary, references = result
-                        
-                        ref_text = ""
-                        if references:
-                            if isinstance(references, (list, tuple)):
-                                ref_lines = [f"[{i+1}] {url}" for i, url in enumerate(references)]
-                                ref_text = "\n\n**References:**\n" + "\n".join(ref_lines)
-                            elif isinstance(references, str):
-                                ref_text = f"\n\n**References:**\n{references}"
-                        
-                        full_text = (summary or "") + (ref_text or "")
-                        if not full_text.strip():
-                            await send_long_message(message.channel, "Sorry, I couldn't generate a response.")
-                            return
-                        
-                        conversation_memory[user_id].append({"role": "assistant", "content": full_text})
-                        try:
-                            embed = create_professional_embed("Monsterrr Web Search", full_text)
-                            await message.channel.send(embed=embed)
-                        except Exception:
-                            await send_long_message(message.channel, full_text)
-                        return
+                    if isinstance(result, dict):
+                        summary = result.get("summary") or result.get("answer") or ""
+                        references = result.get("references") or result.get("sources") or result.get("urls")
+                    elif isinstance(result, tuple) and len(result) == 2:
+                        summary, references = result
                     
-                    except Exception as e:
-                        logger.exception("Web search failed: %s", e)
-                        await send_long_message(message.channel, f"⚠️ Web Search Error: {e}")
-                        return
-                
-                else:
-                    # Fallback to LLM
-                    if groq_service is None:
-                        await send_long_message(message.channel, "⚠️ AI Error: Monsterrr's AI is not available. Please check configuration.")
-                        return
+                    ref_text = ""
+                    if references:
+                        if isinstance(references, (list, tuple)):
+                            ref_lines = [f"[{i+1}] {url}" for i, url in enumerate(references)]
+                            ref_text = "\n\n**References:**\n" + "\n".join(ref_lines)
+                        elif isinstance(references, str):
+                            ref_text = f"\n\n**References:**\n{references}"
                     
-                    ai_reply = await asyncio.to_thread(_call_groq, content, GROQ_MODEL)
-                    if not ai_reply:
+                    full_text = (summary or "") + (ref_text or "")
+                    if not full_text.strip():
                         await send_long_message(message.channel, "Sorry, I couldn't generate a response.")
                         return
                     
-                    org = os.getenv("GITHUB_ORG", "unknown")
-                    answer = re.sub(r"(?i)the GitHub organization I manage( is called| is|:)? [^\n.]+", 
-                                   f"the GitHub organization I manage is called {org}", ai_reply)
-                    
-                    conversation_memory[user_id].append({"role": "assistant", "content": answer})
+                    conversation_memory[user_id].append({"role": "assistant", "content": full_text})
                     try:
-                        embed = create_professional_embed("Monsterrr", answer)
+                        embed = create_professional_embed("Monsterrr Web Search", full_text)
                         await message.channel.send(embed=embed)
                     except Exception:
-                        await send_long_message(message.channel, answer)
+                        await send_long_message(message.channel, full_text)
+                    return
+                
+                except Exception as e:
+                    logger.exception("Web search failed: %s", e)
+                    await send_long_message(message.channel, f"⚠️ Web Search Error: {e}")
                     return
             
-            except Exception as e:
-                logger.exception("AI reply failed: %s", e)
+            else:
+                # Fallback to LLM
+                if groq_service is None:
+                    await send_long_message(message.channel, "⚠️ AI Error: Monsterrr's AI is not available. Please check configuration.")
+                    return
+                
+                ai_reply = await asyncio.to_thread(_call_groq, content, GROQ_MODEL)
+                if not ai_reply:
+                    await send_long_message(message.channel, "Sorry, I couldn't generate a response.")
+                    return
+                
+                org = os.getenv("GITHUB_ORG", "unknown")
+                answer = re.sub(r"(?i)the GitHub organization I manage( is called| is|:)? [^\n.]+", 
+                               f"the GitHub organization I manage is called {org}", ai_reply)
+                
+                conversation_memory[user_id].append({"role": "assistant", "content": answer})
                 try:
-                    await send_long_message(message.channel, f"⚠️ AI Error: {e}")
+                    embed = create_professional_embed("Monsterrr", answer)
+                    await message.channel.send(embed=embed)
                 except Exception:
-                    pass
+                    await send_long_message(message.channel, answer)
+                return
+        
+        except Exception as e:
+            logger.exception("AI reply failed: %s", e)
+            try:
+                await send_long_message(message.channel, f"⚠️ AI Error: {e}")
+            except Exception:
+                pass
 
 # Discord Commands
 @bot.command(name="repos")
@@ -1868,16 +1906,18 @@ async def improve_cmd(ctx: commands.Context, repo: str):
 async def maintain_cmd(ctx: commands.Context):
     """Perform maintenance on all repositories."""
     try:
-        from agents.maintainer_agent import MaintainerAgent
+        from agents.creator_agent import CreatorAgent
         from services.github_service import GitHubService
         
         github = GitHubService(logger=logger)
-        maintainer = MaintainerAgent(github, groq_service, logger)
-        maintainer.perform_maintenance()
+        creator = CreatorAgent(github, logger)
         
-        await ctx.send("Maintenance tasks started across all repositories.")
+        creator.perform_maintenance()
+        await ctx.send("Maintenance process started. Check back later for results.")
     except Exception as e:
         await ctx.send(f"Error performing maintenance: {e}")
+
+
 
 
 @bot.command(name="language")
