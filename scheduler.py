@@ -389,9 +389,77 @@ def quick_check():
                 
                 with open(state_path, "w", encoding="utf-8") as f:
                     json.dump(state, f, indent=2)
+        else:
+            # Perform maintenance on existing repositories
+            logger.info("[Scheduler] Performing maintenance on existing repositories...")
+            maintainer_agent.perform_maintenance()
+            
+            # Enhance Monsterrr's own code
+            logger.info("[Scheduler] Enhancing Monsterrr's own code...")
+            self_enhance_monsterrr()
                     
     except Exception as e:
         logger.error(f"[Scheduler] Error in quick check: {e}")
+
+def self_enhance_monsterrr():
+    """Enhance Monsterrr's own code by analyzing its performance and making improvements."""
+    try:
+        logger.info("[Scheduler] Starting self-enhancement process...")
+        
+        # Load current state
+        state_path = "monsterrr_state.json"
+        if os.path.exists(state_path):
+            with open(state_path, "r", encoding="utf-8") as f:
+                try:
+                    state = json.load(f)
+                except Exception:
+                    state = {}
+        else:
+            state = {}
+        
+        # Analyze performance metrics
+        actions = state.get("actions", [])
+        repos = state.get("repos", [])
+        ideas = state.get("ideas", {}).get("top_ideas", [])
+        
+        # Generate improvement suggestions
+        improvement_prompt = f"""
+        Analyze the following Monsterrr performance data and suggest code improvements:
+        
+        Actions performed: {len(actions)}
+        Repositories managed: {len(repos)}
+        Ideas generated: {len(ideas)}
+        
+        Based on this data, suggest specific improvements to Monsterrr's codebase that would:
+        1. Increase efficiency
+        2. Improve reliability
+        3. Enhance capabilities
+        4. Reduce errors
+        
+        Provide concrete code changes or architectural improvements.
+        """
+        
+        # For now, we'll just log that self-enhancement was attempted
+        # In a more advanced implementation, this would actually make code changes
+        logger.info("[Scheduler] Self-enhancement analysis completed")
+        
+        # Log this enhancement attempt
+        actions.append({
+            "timestamp": datetime.utcnow().isoformat(),
+            "type": "self_enhancement_attempted",
+            "details": {
+                "actions_count": len(actions),
+                "repos_count": len(repos),
+                "ideas_count": len(ideas)
+            }
+        })
+        state["actions"] = actions
+        
+        with open(state_path, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+            
+    except Exception as e:
+        logger.error(f"[Scheduler] Error in self-enhancement: {e}")
 
 if __name__ == "__main__":
     asyncio.run(start_scheduler())

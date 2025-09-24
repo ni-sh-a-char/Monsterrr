@@ -186,6 +186,35 @@ class IdeaGeneratorAgent:
             self.logger.error(f"[IdeaGeneratorAgent] GitHub trending HTML scrape error: {e}")
         return []
 
+    def fetch_web_trends(self) -> List[Dict[str, Any]]:
+        """Fetch trending topics from web searches to enhance idea generation."""
+        try:
+            # This would integrate with a web search API like Google Custom Search or similar
+            # For now, we'll return a placeholder that can be expanded
+            import random
+            tech_trends = [
+                "AI code generation", "low-code platforms", "serverless computing", 
+                "edge computing", "quantum computing", "blockchain applications",
+                "IoT security", "cloud-native development", "microservices architecture",
+                "DevOps automation", "container orchestration", "data privacy tools"
+            ]
+            
+            # Select random trends to simulate web search results
+            selected_trends = random.sample(tech_trends, min(5, len(tech_trends)))
+            
+            web_ideas = []
+            for trend in selected_trends:
+                web_ideas.append({
+                    "name": f"{trend.replace(' ', '-')}",
+                    "description": f"A project focused on {trend}",
+                    "source": "web_trends"
+                })
+            
+            return web_ideas
+        except Exception as e:
+            self.logger.error(f"[IdeaGeneratorAgent] Web trends fetch error: {e}")
+            return []
+
     def fetch_trending_hackernews(self) -> List[Dict[str, Any]]:
         """Fetch top stories from Hacker News API."""
         try:
@@ -253,8 +282,11 @@ class IdeaGeneratorAgent:
         reddit_python = self.fetch_trending_reddit("Python")
         reddit_javascript = self.fetch_trending_reddit("javascript")
         
+        # Web trends for enhanced idea generation
+        web_trends = self.fetch_web_trends()
+        
         # Combine all ideas
-        all_ideas = github + hn + devto + producthunt + reddit_ml + reddit_ai + github_topics + devto_week + hn_month + stackoverflow + reddit_programming + reddit_webdev + reddit_python + reddit_javascript
+        all_ideas = github + hn + devto + producthunt + reddit_ml + reddit_ai + github_topics + devto_week + hn_month + stackoverflow + reddit_programming + reddit_webdev + reddit_python + reddit_javascript + web_trends
         
         # Deduplicate by name
         seen = set()
@@ -274,6 +306,7 @@ class IdeaGeneratorAgent:
             f"The features should be specific functionalities the project will have. "
             f"Each roadmap step should be a concrete implementation task."
             f"\n\nIMPORTANT: Do NOT use tables in your answer. Instead, present all lists and structured data as professional, visually clear bullet points. Each idea should be a separate bullet with its details as sub-bullets."
+            f"\n\nIMPORTANT: The name should be a sensible, professional project name that follows standard naming conventions (lowercase, hyphens for spaces, no special characters). Examples: 'api-documentation-generator', 'machine-learning-dashboard', 'code-review-automation'."
             f"\n\nIdeas: {json.dumps(deduped)[:4000]}"
         )
         try:

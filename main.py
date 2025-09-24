@@ -106,6 +106,9 @@ def watchdog():
     """Enhanced watchdog that monitors health without restarting."""
     logger.info("[Main] Watchdog monitoring started - will not restart application")
     
+    failure_count = 0
+    max_failures = 3  # Only restart after 3 consecutive failures
+    
     while True:
         time.sleep(300)  # Check every 5 minutes
         # Check health but don't restart
@@ -114,12 +117,21 @@ def watchdog():
             r = requests.get(f"http://localhost:{PORT}/health", timeout=10)
             if r.status_code == 200:
                 logger.debug("[Main] Health check passed.")
+                failure_count = 0  # Reset failure count on success
             else:
                 logger.warning(f"[Main] Health check failed: Status code {r.status_code}")
+                failure_count += 1
         except requests.exceptions.RequestException as e:
             logger.warning(f"[Main] Health check network error: {e}")
+            failure_count += 1
         except Exception as e:
             logger.error(f"[Main] Unexpected error in watchdog: {e}")
+            failure_count += 1
+        
+        # Only consider restart after multiple consecutive failures
+        if failure_count >= max_failures:
+            logger.error(f"[Main] {failure_count} consecutive health check failures. Application may be unstable.")
+            failure_count = 0  # Reset to avoid continuous logging
 
 def start_watchdog():
     """Start the enhanced watchdog."""

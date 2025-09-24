@@ -1408,6 +1408,8 @@ async def project_cmd(ctx: commands.Context, action: str, *, args: str = ""):
     
     # Handle explicit commands with ! prefix
     if content.startswith("!"):
+        # Remove the ! prefix and process as command
+        command_content = content[1:].strip()
         await bot.process_commands(message)
         return
     
@@ -1444,7 +1446,8 @@ async def project_cmd(ctx: commands.Context, action: str, *, args: str = ""):
             ("what can you do", "guide_cmd"), ("what are you", "guide_cmd"), ("who are you", "guide_cmd"),
             ("tell me about", "status_cmd"), ("what's happening", "status_cmd"), ("what's up", "status_cmd"),
             ("how are you", "status_cmd"), ("organization status", "status_cmd"), ("org status", "status_cmd"),
-            ("github status", "status_cmd"), ("project status", "status_cmd"), ("repo status", "status_cmd")
+            ("github status", "status_cmd"), ("project status", "status_cmd"), ("repo status", "status_cmd"),
+            ("consciousness", "consciousness"), ("learnings", "learnings"), ("project", "project_board")
         ]
         
         intent = None
