@@ -47,9 +47,12 @@ def start_keep_alive():
             time.sleep(300)
     
     # Start the keep-alive thread
-    keep_alive_thread = threading.Thread(target=ping_self, daemon=True)
-    keep_alive_thread.start()
-    logger.info("[Keep-Alive] Started keep-alive mechanism")
+    try:
+        keep_alive_thread = threading.Thread(target=ping_self, daemon=True)
+        keep_alive_thread.start()
+        logger.info("[Keep-Alive] Started keep-alive mechanism")
+    except Exception as e:
+        logger.error(f"[Keep-Alive] Failed to start keep-alive mechanism: {e}")
 
 # Import services
 from services.discord_bot import run_bot as run_discord_bot
@@ -79,29 +82,46 @@ async def root():
 
 def setup_memory_management():
     """Setup memory management to prevent exceeding Render limits."""
-    import resource
+    # Check if we're on a Unix-like system (Linux/Mac) that supports resource module
+    import platform
+    system = platform.system().lower()
     
-    # Set memory limit (512MB for Render free tier)
+    if system not in ['linux', 'darwin']:
+        logger.info(f"[Main] Memory management not available on {system}. Skipping.")
+        return
+    
     try:
+        import resource
+        # Set memory limit (512MB for Render free tier)
         # Get current memory usage
         memory_limit = 512 * 1024 * 1024  # 512 MB in bytes
         resource.setrlimit(resource.RLIMIT_AS, (memory_limit, memory_limit))
         logger.info(f"[Main] Set memory limit to {memory_limit / (1024*1024):.0f} MB")
+    except ImportError:
+        logger.warning("[Main] Resource module not available. Memory management disabled.")
     except Exception as e:
         logger.warning(f"[Main] Could not set memory limit: {e}")
 
 def get_memory_usage():
     """Get current memory usage in MB."""
     try:
+        import psutil
         process = psutil.Process(os.getpid())
         return process.memory_info().rss / 1024 / 1024
+    except ImportError:
+        logger.warning("[Main] psutil not available. Memory monitoring disabled.")
+        return 0
     except Exception:
         return 0
 
 def log_memory_usage():
     """Log current memory usage."""
-    memory_mb = get_memory_usage()
-    logger.info(f"[Main] Current memory usage: {memory_mb:.1f} MB")
+    try:
+        memory_mb = get_memory_usage()
+        if memory_mb > 0:
+            logger.info(f"[Main] Current memory usage: {memory_mb:.1f} MB")
+    except Exception as e:
+        logger.warning(f"[Main] Could not log memory usage: {e}")
 
 def periodic_memory_cleanup():
     """Periodically clean up memory to prevent leaks."""
@@ -126,14 +146,18 @@ async def memory_monitor():
     async def monitor_task():
         while True:
             await asyncio.sleep(300)  # Check every 5 minutes
-            memory_mb = get_memory_usage()
-            logger.info(f"[Main] Memory monitor check: {memory_mb:.1f} MB")
-            
-            # If memory usage exceeds 400MB, force cleanup
-            if memory_mb > 400:
-                logger.warning(f"[Main] High memory usage detected: {memory_mb:.1f} MB. Forcing cleanup.")
-                gc.collect()
-                log_memory_usage()
+            try:
+                memory_mb = get_memory_usage()
+                if memory_mb > 0:
+                    logger.info(f"[Main] Memory monitor check: {memory_mb:.1f} MB")
+                    
+                    # If memory usage exceeds 400MB, force cleanup
+                    if memory_mb > 400:
+                        logger.warning(f"[Main] High memory usage detected: {memory_mb:.1f} MB. Forcing cleanup.")
+                        gc.collect()
+                        log_memory_usage()
+            except Exception as e:
+                logger.warning(f"[Main] Memory monitor error: {e}")
     
     return monitor_task()
 
