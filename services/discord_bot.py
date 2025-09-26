@@ -213,12 +213,6 @@ def run_orchestrator_background():
     orchestrator_thread = threading.Thread(target=orchestrator_wrapper, daemon=True)
     orchestrator_thread.start()
 
-            asyncio.set_event_loop(loop)
-            loop.create_task(orchestrator_wrapper())
-            loop.run_forever()
-        orchestrator_thread = threading.Thread(target=run_orchestrator_background, daemon=True)
-        orchestrator_thread.start()
-
 # Discord bot setup
 intents = discord.Intents.default()
 intents.guilds = True
