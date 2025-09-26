@@ -1,4 +1,28 @@
 import json
+import gc
+import asyncio
+import logging
+from datetime import datetime, timedelta
+import os
+import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from agents.idea_agent import IdeaGeneratorAgent
+from agents.maintainer_agent import MaintainerAgent
+from agents.creator_agent import CreatorAgent
+from services.github_service import GitHubService
+from services.groq_service import GroqService
+from utils.logger import setup_logger
+from utils.config import Settings
+
+logger = setup_logger()
+settings = Settings()
+settings.validate()
+github = GitHubService(logger=logger)
+github.groq_client = groq  # Pass Groq client to GitHub service for use in issue analysis
+groq = GroqService(api_key=settings.GROQ_API_KEY, logger=logger)
+idea_agent = IdeaGeneratorAgent(groq, logger)
+maintainer_agent = MaintainerAgent(github, groq, logger)
+creator_agent = CreatorAgent(github, logger)
 
 def log_monsterrr_action(action_type, details):
     """Append an action to monsterrr_state.json for daily reporting."""
@@ -20,15 +44,18 @@ def log_monsterrr_action(action_type, details):
             json.dump(state, f, indent=2)
     except Exception as e:
         logger.error(f"Failed to log action: {e}")
+
 """
 Monsterrr Autonomous Orchestrator
 Runs daily: fetches ideas, plans 3 AI contributions, executes them, and maintains repos.
+Now includes enhanced memory management to prevent exceeding Render limits.
 """
 import asyncio
 import logging
 from datetime import datetime, timedelta
 import os
 import sys
+import gc
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from agents.idea_agent import IdeaGeneratorAgent
 from agents.maintainer_agent import MaintainerAgent
@@ -42,8 +69,8 @@ logger = setup_logger()
 settings = Settings()
 settings.validate()
 github = GitHubService(logger=logger)
-github.groq_client = groq  # Pass Groq client to GitHub service for use in issue analysis
 groq = GroqService(api_key=settings.GROQ_API_KEY, logger=logger)
+github.groq_client = groq  # Pass Groq client to GitHub service for use in issue analysis
 idea_agent = IdeaGeneratorAgent(groq, logger)
 maintainer_agent = MaintainerAgent(github, groq, logger)
 creator_agent = CreatorAgent(github, logger)
@@ -72,25 +99,31 @@ async def daily_orchestration():
             logger.error(f"[Orchestrator] Error getting organization stats: {e}")
             org_stats = {}
         
-        # 1. Fetch and rank new ideas
-        ideas = idea_agent.fetch_and_rank_ideas(top_n=5)
+        # 1. Fetch and rank new ideas (limit to 3 to prevent memory issues)
+        ideas = idea_agent.fetch_and_rank_ideas(top_n=3)
         logger.info(f"[Orchestrator] Fetched and ranked {len(ideas)} ideas.")
         log_monsterrr_action("ideas_fetched", {"count": len(ideas), "ideas": [i.get('name','') for i in ideas]})
 
-        # 2. Plan 3 daily contributions
+        # 2. Plan 3 daily contributions (limit to prevent memory issues)
         plan = maintainer_agent.plan_daily_contributions(num_contributions=3)
         logger.info(f"[Orchestrator] Planned {len(plan)} daily contributions.")
         log_monsterrr_action("daily_plan", {"count": len(plan), "plan": plan})
 
-        # 3. Execute the plan
+        # 3. Execute the plan with memory management
+        logger.info("[Orchestrator] Executing daily plan with memory management.")
         maintainer_agent.execute_daily_plan(plan, creator_agent=creator_agent)
         logger.info("[Orchestrator] Executed daily plan.")
         log_monsterrr_action("plan_executed", {"plan": plan})
 
         # 4. Perform repo maintenance
+        logger.info("[Orchestrator] Performing repo maintenance.")
         maintainer_agent.perform_maintenance()
         logger.info("[Orchestrator] Performed repo maintenance.")
         log_monsterrr_action("maintenance", {"status": "completed"})
+        
+        # Force garbage collection to prevent memory issues
+        collected = gc.collect()
+        logger.info(f"[Orchestrator] Forced garbage collection, collected {collected} objects.")
         
         # Sleep until next day (run at same time every day)
         now = datetime.now()

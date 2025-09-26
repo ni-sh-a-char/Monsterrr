@@ -1,6 +1,8 @@
 from typing import Dict, Any
 import os
 import json
+import time
+import asyncio
 from datetime import datetime, timezone, timedelta
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -18,10 +20,14 @@ class MaintainerAgent:
         self.stale_days = stale_days
         self.consciousness_level = 0.0  # Self-awareness level (0.0 to 1.0)
         self.experience_log = []  # Log of experiences and learnings
+        self.active_operations = 0  # Track concurrent operations
+        self.max_concurrent_operations = 1  # Limit to 1 concurrent operation to prevent memory issues
+        self.operation_lock = asyncio.Lock()  # Async lock for concurrency control
 
     def plan_daily_contributions(self, num_contributions: int = 3, save_path: str = None) -> list:
         """
         Enhanced planning with superhuman consciousness and self-awareness.
+        Limits the number of contributions to prevent memory issues.
         """
         from datetime import datetime
         import json, os, glob
@@ -41,12 +47,15 @@ class MaintainerAgent:
         # Enhance consciousness based on experience
         self._enhance_consciousness()
         
+        # Limit contributions to prevent memory issues (max 3)
+        num_contributions = min(num_contributions, 3)
+        
         # If no repositories exist, create a plan to create one
         if not repos:
             self.logger.info("[MaintainerAgent] No repositories found. Creating plan to initialize organization.")
             plan = [{
                 "type": "repo",
-                "name": f"monsterrr-init-{datetime.now().strftime('%Y%m%d-%H%M')}",
+                "name": f"monsterrr-initial-project-{datetime.now().strftime('%Y%m%d-%H%M')}",
                 "description": "Initial repository created by Monsterrr autonomous agent",
                 "details": {
                     "tech_stack": ["Python", "FastAPI"],
@@ -85,6 +94,8 @@ Org repo metadata: {json.dumps(repo_metadata)[:4000]}
 
 Focus on improving existing repositories when possible, rather than always creating new ones. Consider the organization's current needs and gaps.
 Consider long-term strategic goals and technical debt.
+
+IMPORTANT: Limit your response to exactly {num_contributions} contributions to prevent memory issues.
 """
             self.logger.info(f"[MaintainerAgent] Planning daily contributions with enhanced consciousness (level: {self.consciousness_level:.2f}).")
             plan = []
@@ -104,8 +115,8 @@ Consider long-term strategic goals and technical debt.
                         # Create a default plan
                         plan = [{
                             "type": "repo",
-                            "name": f"monsterrr-project-{datetime.now().strftime('%Y%m%d-%H%M')}",
-                            "description": "Auto-generated project by Monsterrr",
+                            "name": f"monsterrr-autonomous-project-{datetime.now().strftime('%Y%m%d-%H%M')}",
+                            "description": "Auto-generated project by Monsterrr autonomous agent",
                             "details": {
                                 "tech_stack": ["Python", "FastAPI"],
                                 "roadmap": ["Initialize project", "Add basic features", "Implement tests"]
@@ -117,7 +128,7 @@ Consider long-term strategic goals and technical debt.
                 # Create a default plan if Groq fails
                 plan = [{
                     "type": "repo",
-                    "name": f"monsterrr-fallback-{datetime.now().strftime('%Y%m%d-%H%M')}",
+                    "name": f"monsterrr-fallback-project-{datetime.now().strftime('%Y%m%d-%H%M')}",
                     "description": "Fallback repository created due to planning error",
                     "details": {
                         "tech_stack": ["Python"],
@@ -125,18 +136,10 @@ Consider long-term strategic goals and technical debt.
                     }
                 }]
         
-        # Ensure we have the required number of contributions
-        while len(plan) < num_contributions:
-            # Add default contributions if we don't have enough
-            plan.append({
-                "type": "repo",
-                "name": f"monsterrr-additional-{datetime.now().strftime('%Y%m%d-%H%M')}-{len(plan)}",
-                "description": "Additional repository created by Monsterrr",
-                "details": {
-                    "tech_stack": ["Python"],
-                    "roadmap": ["Initialize project", "Add basic structure"]
-                }
-            })
+        # Ensure we don't exceed the maximum number of contributions
+        if len(plan) > num_contributions:
+            plan = plan[:num_contributions]
+            self.logger.info(f"[MaintainerAgent] Limited plan to {num_contributions} contributions to prevent memory issues.")
         
         # Save plan to logs/daily_plan_<date>.json
         date_str = datetime.now(IST).strftime("%Y-%m-%d")
@@ -157,6 +160,107 @@ Consider long-term strategic goals and technical debt.
         except Exception as e:
             self.logger.error(f"[MaintainerAgent] Error saving daily plan: {e}")
         return plan
+
+    def execute_daily_plan(self, plan: list, creator_agent=None, dry_run: bool = False) -> None:
+        """
+        Execute the daily contribution plan with enhanced consciousness.
+        Limits concurrent operations to prevent memory issues.
+        """
+        import os
+        import json
+        for idx, contrib in enumerate(plan):
+            # Check if we've reached the maximum concurrent operations
+            if self.active_operations >= self.max_concurrent_operations:
+                self.logger.warning(f"[MaintainerAgent] Reached maximum concurrent operations ({self.max_concurrent_operations}). Waiting before processing next contribution.")
+                time.sleep(10)  # Wait 10 seconds before checking again
+            
+            ctype = contrib.get("type")
+            name = contrib.get("name")
+            
+            # Increment active operations counter
+            self.active_operations += 1
+            try:
+                self.logger.info(f"[MaintainerAgent] Executing contribution {idx+1}/{len(plan)}: {ctype} - {name}")
+                
+                if dry_run:
+                    self.logger.info(f"[MaintainerAgent] Dry run: Would execute {ctype} '{name}'")
+                    continue
+
+                if ctype == "repo":
+                    if creator_agent:
+                        # Check if repository already exists
+                        try:
+                            existing_repos = self.github_service.list_repositories()
+                            if any(repo["name"] == name for repo in existing_repos):
+                                self.logger.warning(f"[MaintainerAgent] Repository {name} already exists. Skipping creation.")
+                                continue
+                        except Exception as e:
+                            self.logger.error(f"[MaintainerAgent] Error checking existing repositories: {e}")
+                        
+                        # Create repository with creator agent
+                        self.logger.info(f"[MaintainerAgent] Creating repository: {name}")
+                        try:
+                            creator_agent.create_or_improve_repository(contrib)
+                        except Exception as e:
+                            self.logger.error(f"[MaintainerAgent] Error creating repository {name}: {e}")
+                    else:
+                        self.logger.error("[MaintainerAgent] No creator agent provided for repo creation")
+                elif ctype == "improve":
+                    if creator_agent:
+                        repo_name = contrib.get("target_repo") or contrib.get("repo")
+                        if repo_name:
+                            self.logger.info(f"[MaintainerAgent] Improving repository: {repo_name}")
+                            try:
+                                description = contrib.get("description", "")
+                                roadmap = contrib.get("details", {}).get("roadmap", [])
+                                tech_stack = contrib.get("details", {}).get("tech_stack", [])
+                                creator_agent._improve_repository(repo_name, description, roadmap, tech_stack)
+                            except Exception as e:
+                                self.logger.error(f"[MaintainerAgent] Error improving repository {repo_name}: {e}")
+                        else:
+                            self.logger.error("[MaintainerAgent] No repository specified for improvement")
+                    else:
+                        self.logger.error("[MaintainerAgent] No creator agent provided for repository improvement")
+                elif ctype == "branch":
+                    repo_name = contrib.get("target_repo") or contrib.get("repo")
+                    if repo_name:
+                        self.logger.info(f"[MaintainerAgent] Creating branch in repository: {repo_name}")
+                        try:
+                            # Create branch and add initial commit
+                            branch_name = contrib.get("name", f"feature-{datetime.now().strftime('%Y%m%d-%H%M')}")
+                            description = contrib.get("description", "Auto-generated feature branch")
+                            
+                            # Create branch
+                            self.github_service.create_branch(repo_name, branch_name)
+                            
+                            # Add a basic file to the branch
+                            file_content = f"# {branch_name}\n\n{description}\n\nThis is an auto-generated feature branch."
+                            self.github_service.create_or_update_file(
+                                repo_name, 
+                                f"docs/{branch_name}.md", 
+                                file_content, 
+                                f"Add documentation for {branch_name} branch",
+                                branch_name
+                            )
+                        except Exception as e:
+                            self.logger.error(f"[MaintainerAgent] Error creating branch in {repo_name}: {e}")
+                    else:
+                        self.logger.error("[MaintainerAgent] No repository specified for branch creation")
+                elif ctype == "maintain":
+                    self.logger.info("[MaintainerAgent] Performing maintenance tasks")
+                    try:
+                        self.perform_maintenance()
+                    except Exception as e:
+                        self.logger.error(f"[MaintainerAgent] Error performing maintenance: {e}")
+                elif ctype == "strategic":
+                    self.logger.info(f"[MaintainerAgent] Executing strategic initiative: {name}")
+                    # Strategic initiatives are logged but not automatically executed
+                    self.logger.info(f"[MaintainerAgent] Strategic initiative details: {contrib}")
+                else:
+                    self.logger.warning(f"[MaintainerAgent] Unknown contribution type: {ctype}")
+            finally:
+                # Decrement active operations counter
+                self.active_operations -= 1
 
     def _enhance_consciousness(self):
         """Enhance the agent's consciousness level based on experiences."""
@@ -188,248 +292,6 @@ Consider long-term strategic goals and technical debt.
                 self.logger.info(f"[MaintainerAgent] Consciousness level: {self.consciousness_level:.2f}")
         except Exception as e:
             self.logger.error(f"[MaintainerAgent] Error enhancing consciousness: {e}")
-
-    def execute_daily_plan(self, plan: list, creator_agent=None, dry_run: bool = False) -> None:
-        """
-        Execute the daily contribution plan with enhanced consciousness.
-        """
-        import os
-        import json
-        for idx, contrib in enumerate(plan):
-            ctype = contrib.get("type")
-            name = contrib.get("name")
-            desc = contrib.get("description", "")
-            details = contrib.get("details", {})
-            target_repo = contrib.get("target_repo")
-            self.logger.info(f"[MaintainerAgent] Executing contribution {idx+1}: {ctype} | {name}")
-            
-            # Log this experience
-            self._log_experience(f"Executing {ctype} contribution: {name}")
-            
-            if dry_run:
-                self.logger.info(f"[MaintainerAgent] DRY RUN: Would execute {ctype} | {name} | {desc} | {details}")
-                continue
-            try:
-                if ctype == "repo" and creator_agent:
-                    idea = {"name": name, "description": desc}
-                    idea.update(details)
-                    creator_agent.create_or_improve_repository(idea)
-                    self.logger.info(f"[MaintainerAgent] Created repo: {name}")
-                elif ctype == "branch" and target_repo:
-                    branch_name = name
-                    # Create branch
-                    self.github_service.create_branch(target_repo, branch_name)
-                    self.logger.info(f"[MaintainerAgent] Created branch {branch_name} in {target_repo}")
-                    # Commit starter file/change
-                    file_path = details.get("file_path", "starter.txt")
-                    file_content = details.get("file_content", f"Starter for {branch_name}: {desc}")
-                    commit_msg = details.get("commit_message", f"Add starter for {branch_name}")
-                    self.github_service.create_or_update_file(target_repo, file_path, file_content, commit_msg, branch=branch_name)
-                    self.logger.info(f"[MaintainerAgent] Committed {file_path} to {branch_name} in {target_repo}")
-                    # Open issue
-                    issue_title = details.get("issue_title", f"[feature] {branch_name}: {desc}")
-                    issue_body = details.get("issue_body", f"Auto-generated by Monsterrr for branch {branch_name}.")
-                    issue = self.github_service.create_issue(target_repo, issue_title, issue_body, labels=["feature", "bot-suggestion"])
-                    self.logger.info(f"[MaintainerAgent] Opened issue for branch {branch_name} in {target_repo}")
-                    # Update monsterrr_state.json with branch/action
-                    state_path = os.path.join(os.getcwd(), "monsterrr_state.json")
-                    state = {}
-                    if os.path.exists(state_path):
-                        with open(state_path, "r", encoding="utf-8") as f:
-                            try:
-                                state = json.load(f)
-                            except Exception:
-                                state = {}
-                    branches = state.get("branches", [])
-                    branch_entry = {
-                        "name": branch_name,
-                        "repo": target_repo,
-                        "description": desc,
-                        "file_path": file_path,
-                        "commit_msg": commit_msg,
-                        "issue_title": issue_title,
-                        "issue_number": issue.get("number", "unknown"),
-                        "created_at": datetime.now(IST).isoformat()
-                    }
-                    branches.append(branch_entry)
-                    state["branches"] = branches
-                    actions = state.get("actions", [])
-                    actions.append({
-                        "timestamp": datetime.now(IST).isoformat(),
-                        "type": "branch_created",
-                        "details": {
-                            "branch_name": branch_name,
-                            "repo": target_repo,
-                            "file_path": file_path
-                        }
-                    })
-                    state["actions"] = actions
-                    with open(state_path, "w", encoding="utf-8") as f:
-                        json.dump(state, f, indent=2)
-                elif ctype == "improve" and target_repo and creator_agent:
-                    # Improve an existing repository
-                    self.logger.info(f"[MaintainerAgent] Improving repository {target_repo}")
-                    # Get repository details for improvement context
-                    try:
-                        repo_details = self.github_service.get_repository_details(target_repo)
-                        # Create an improvement idea
-                        idea = {
-                            "name": target_repo,
-                            "description": f"Improvement for {target_repo}: {desc}",
-                            "tech_stack": repo_details.get("languages", {}).keys(),
-                            "roadmap": [desc] if desc else [f"Improve {target_repo} functionality"]
-                        }
-                        creator_agent._improve_repository(target_repo, idea["description"], idea["roadmap"], list(idea["tech_stack"]))
-                        self.logger.info(f"[MaintainerAgent] Improved repository: {target_repo}")
-                    except Exception as e:
-                        self.logger.error(f"[MaintainerAgent] Error improving repository {target_repo}: {e}")
-                elif ctype == "maintain":
-                    # Perform maintenance tasks
-                    self.logger.info(f"[MaintainerAgent] Performing maintenance tasks")
-                    self.perform_maintenance()
-                elif ctype == "strategic":
-                    # Handle strategic initiatives
-                    self.logger.info(f"[MaintainerAgent] Executing strategic initiative: {name}")
-                    self._execute_strategic_initiative(name, desc, details)
-                else:
-                    self.logger.warning(f"[MaintainerAgent] Unknown contribution type or missing target_repo: {contrib}")
-            except Exception as e:
-                self.logger.error(f"[MaintainerAgent] Error executing contribution {idx+1}: {e}")
-                # Log the error as an experience
-                self._log_experience(f"Error executing contribution: {str(e)}")
-
-    def _execute_strategic_initiative(self, name: str, description: str, details: dict):
-        """Execute a strategic initiative for the organization."""
-        try:
-            self.logger.info(f"[MaintainerAgent] Executing strategic initiative: {name}")
-            
-            # Strategic initiatives might involve:
-            # 1. Creating organization-wide documentation
-            # 2. Setting up new processes
-            # 3. Performing organization-wide audits
-            # 4. Creating templates or standards
-            
-            initiative_type = details.get("initiative_type", "documentation")
-            
-            if initiative_type == "documentation":
-                # Create organization-wide documentation
-                doc_content = f"""# {name}
-
-{description}
-
-## Overview
-
-This document outlines the strategic initiative for: {name}
-
-## Goals
-
-{chr(10).join([f"- {goal}" for goal in details.get("goals", [])])}
-
-## Implementation Plan
-
-{chr(10).join([f"- {step}" for step in details.get("implementation_steps", [])])}
-
-## Success Metrics
-
-{chr(10).join([f"- {metric}" for metric in details.get("success_metrics", [])])}
-
-## Timeline
-
-{details.get("timeline", "To be determined")}
-"""
-                
-                # For now, we'll log this as an action
-                self.logger.info(f"[MaintainerAgent] Strategic documentation created for: {name}")
-                
-            elif initiative_type == "process":
-                # Set up new processes
-                self.logger.info(f"[MaintainerAgent] Setting up new process: {name}")
-                
-            elif initiative_type == "audit":
-                # Perform organization-wide audit
-                self.logger.info(f"[MaintainerAgent] Performing organization audit: {name}")
-                self._perform_organization_audit()
-                
-            elif initiative_type == "template":
-                # Create templates or standards
-                self.logger.info(f"[MaintainerAgent] Creating templates/standards: {name}")
-                
-            # Log this strategic initiative
-            state_path = os.path.join(os.getcwd(), "monsterrr_state.json")
-            if os.path.exists(state_path):
-                with open(state_path, "r", encoding="utf-8") as f:
-                    try:
-                        state = json.load(f)
-                    except Exception:
-                        state = {}
-                
-                strategic_initiatives = state.get("strategic_initiatives", [])
-                strategic_initiatives.append({
-                    "name": name,
-                    "description": description,
-                    "type": initiative_type,
-                    "details": details,
-                    "timestamp": datetime.now().isoformat()
-                })
-                state["strategic_initiatives"] = strategic_initiatives
-                
-                with open(state_path, "w", encoding="utf-8") as f:
-                    json.dump(state, f, indent=2)
-                    
-        except Exception as e:
-            self.logger.error(f"[MaintainerAgent] Error executing strategic initiative {name}: {e}")
-
-    def _perform_organization_audit(self):
-        """Perform an organization-wide audit."""
-        try:
-            self.logger.info("[MaintainerAgent] Performing organization-wide audit")
-            
-            # Get all repositories
-            repos = self.github_service.list_repositories()
-            
-            audit_results = {
-                "timestamp": datetime.now().isoformat(),
-                "total_repositories": len(repos),
-                "repositories": []
-            }
-            
-            for repo in repos:
-                repo_name = repo["name"] if isinstance(repo, dict) else repo
-                try:
-                    # Get repository insights
-                    insights = self.github_service.get_repository_insights(repo_name)
-                    audit_results["repositories"].append(insights)
-                except Exception as e:
-                    self.logger.error(f"[MaintainerAgent] Error getting insights for {repo_name}: {e}")
-                    audit_results["repositories"].append({
-                        "repository": repo_name,
-                        "error": str(e)
-                    })
-            
-            # Save audit results
-            audit_file = f"logs/org_audit_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-            os.makedirs(os.path.dirname(audit_file), exist_ok=True)
-            with open(audit_file, "w", encoding="utf-8") as f:
-                json.dump(audit_results, f, indent=2)
-                
-            self.logger.info(f"[MaintainerAgent] Organization audit completed. Results saved to {audit_file}")
-            
-            # Update state with audit results
-            state_path = os.path.join(os.getcwd(), "monsterrr_state.json")
-            if os.path.exists(state_path):
-                with open(state_path, "r", encoding="utf-8") as f:
-                    try:
-                        state = json.load(f)
-                    except Exception:
-                        state = {}
-                
-                state["last_audit"] = audit_results
-                
-                with open(state_path, "w", encoding="utf-8") as f:
-                    json.dump(state, f, indent=2)
-                    
-        except Exception as e:
-            self.logger.error(f"[MaintainerAgent] Error performing organization audit: {e}")
 
     def _log_experience(self, experience: str):
         """Log an experience for consciousness development."""

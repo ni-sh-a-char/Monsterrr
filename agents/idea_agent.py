@@ -3,6 +3,7 @@ import os
 import json
 import time
 import requests
+import re
 from datetime import datetime, timezone, timedelta
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -196,7 +197,10 @@ class IdeaGeneratorAgent:
                 "AI code generation", "low-code platforms", "serverless computing", 
                 "edge computing", "quantum computing", "blockchain applications",
                 "IoT security", "cloud-native development", "microservices architecture",
-                "DevOps automation", "container orchestration", "data privacy tools"
+                "DevOps automation", "container orchestration", "data privacy tools",
+                "real-time analytics", "predictive maintenance", "digital twins",
+                "cybersecurity automation", "API gateway management", "data visualization",
+                "natural language processing", "computer vision applications"
             ]
             
             # Select random trends to simulate web search results
@@ -204,8 +208,16 @@ class IdeaGeneratorAgent:
             
             web_ideas = []
             for trend in selected_trends:
+                # Generate more meaningful project names based on the trend
+                name_parts = trend.lower().replace(" ", "-").replace("/", "-").split("-")
+                # Create a more descriptive name
+                if len(name_parts) > 1:
+                    name = f"{name_parts[0]}-{name_parts[-1]}-tool"
+                else:
+                    name = f"{name_parts[0]}-utility"
+                    
                 web_ideas.append({
-                    "name": f"{trend.replace(' ', '-')}",
+                    "name": name,
                     "description": f"A project focused on {trend}",
                     "source": "web_trends"
                 })
@@ -258,6 +270,51 @@ class IdeaGeneratorAgent:
         except Exception as e:
             self.logger.error(f"[IdeaGeneratorAgent] Error saving state: {e}")
 
+    def _sanitize_repo_name(self, name: str) -> str:
+        """Sanitize repository name to prevent weird names and ensure meaningful names."""
+        if not name:
+            return "monsterrr-project"
+        
+        # Convert to lowercase
+        name = name.lower().strip()
+        
+        # Replace spaces and underscores with hyphens
+        name = name.replace(" ", "-").replace("_", "-")
+        
+        # Remove special characters except hyphens
+        name = re.sub(r"[^a-z0-9\-]", "", name)
+        
+        # Remove multiple consecutive hyphens
+        name = re.sub(r"-+", "-", name)
+        
+        # Remove leading/trailing hyphens
+        name = name.strip("-")
+        
+        # Additional validation to ensure meaningful names
+        # Check if name contains only numbers or is too short
+        if not name or name.isdigit() or len(name) < 3:
+            name = "monsterrr-project"
+        # Check if name is too generic
+        elif name in ["project", "app", "application", "software", "tool", "program", "demo", "test", "example"]:
+            name = f"monsterrr-{name}"
+        # Ensure name is descriptive enough
+        elif len(name) < 6 and "-" not in name:
+            name = f"monsterrr-{name}-tool"
+        # Check for meaningless combinations
+        elif re.match(r"^[a-z]{3,6}-[a-z]{3,6}$", name) and not any(keyword in name for keyword in [
+            "api", "bot", "cli", "web", "data", "code", "dev", "auto", "smart", "ml", "ai", "cloud", "iot", "sec"
+        ]):
+            # If it's a generic two-word combination, make it more specific
+            name = f"{name}-utility"
+        
+        # Ensure name is not empty and not too long
+        if not name:
+            name = "monsterrr-project"
+        elif len(name) > 50:
+            name = name[:50].rstrip("-")
+            
+        return name
+
     def fetch_and_rank_ideas(self, top_n: int = 5) -> List[Dict[str, Any]]:
         """
         Fetch trending ideas from multiple sources, deduplicate, summarize and rank with Groq, and store top N in monsterrr_state.json.
@@ -307,6 +364,7 @@ class IdeaGeneratorAgent:
             f"Each roadmap step should be a concrete implementation task."
             f"\n\nIMPORTANT: Do NOT use tables in your answer. Instead, present all lists and structured data as professional, visually clear bullet points. Each idea should be a separate bullet with its details as sub-bullets."
             f"\n\nIMPORTANT: The name should be a sensible, professional project name that follows standard naming conventions (lowercase, hyphens for spaces, no special characters). Examples: 'api-documentation-generator', 'machine-learning-dashboard', 'code-review-automation'."
+            f"\n\nIMPORTANT: The name should clearly indicate what the project does and should be descriptive. Avoid generic names like 'project' or 'app'. The name should be between 6-30 characters and should clearly communicate the project's purpose."
             f"\n\nIdeas: {json.dumps(deduped)[:4000]}"
         )
         try:
@@ -330,6 +388,12 @@ class IdeaGeneratorAgent:
         except Exception as e:
             self.logger.error(f"[IdeaGeneratorAgent] Groq summarization error: {e}")
             ideas = []
+        
+        # Sanitize repository names to prevent weird names
+        for idea in ideas:
+            if "name" in idea:
+                idea["name"] = self._sanitize_repo_name(idea["name"])
+        
         # Store in monsterrr_state.json
         state = self._load_state()
         state['ideas'] = {

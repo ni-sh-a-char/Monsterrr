@@ -4,6 +4,7 @@ GitHub API wrapper for Monsterrr.
 
 
 import os
+import time
 from dotenv import load_dotenv
 load_dotenv()
 import httpx
@@ -297,8 +298,13 @@ class GitHubService(BaseService):
         resp = self._request("GET", url)
         return resp.json()
 
-    def create_repository(self, name: str, description: str = "", private: bool = False) -> Dict[str, Any]:
-        """Create a new repository in the organization with retry logic."""
+    def create_repository(self, name: str, description: str = "", private: bool = True) -> Dict[str, Any]:
+        """Create a new repository in the organization with retry logic.
+        Defaults to private repositories to prevent accidental public exposure."""
+        
+        # Validate and sanitize repository name
+        name = self._sanitize_repo_name(name)
+        
         url = f"{self.BASE_URL}/orgs/{self.org}/repos"
         data = {"name": name, "description": description, "private": private, "auto_init": True}
         
@@ -307,7 +313,7 @@ class GitHubService(BaseService):
             try:
                 resp = self._request("POST", url, json=data)
                 result = resp.json()
-                self.logger.info(f"[GitHubService] Successfully created repository {name}")
+                self.logger.info(f"[GitHubService] Successfully created {'private' if private else 'public'} repository {name}")
                 return result
             except GitHubAPIError as e:
                 if "already exists" in str(e).lower():
@@ -332,6 +338,53 @@ class GitHubService(BaseService):
                 else:
                     self.logger.error(f"[GitHubService] Unexpected error creating repository {name} after 3 attempts: {e}")
                     raise
+
+    def _sanitize_repo_name(self, name: str) -> str:
+        """Sanitize repository name to ensure meaningful names."""
+        import re
+        
+        if not name:
+            return "monsterrr-project"
+        
+        # Convert to lowercase
+        name = name.lower().strip()
+        
+        # Replace spaces and underscores with hyphens
+        name = name.replace(" ", "-").replace("_", "-")
+        
+        # Remove special characters except hyphens
+        name = re.sub(r"[^a-z0-9\-]", "", name)
+        
+        # Remove multiple consecutive hyphens
+        name = re.sub(r"-+", "-", name)
+        
+        # Remove leading/trailing hyphens
+        name = name.strip("-")
+        
+        # Additional validation to ensure meaningful names
+        # Check if name contains only numbers or is too short
+        if not name or name.isdigit() or len(name) < 3:
+            name = "monsterrr-project"
+        # Check if name is too generic
+        elif name in ["project", "app", "application", "software", "tool", "program", "demo", "test", "example"]:
+            name = f"monsterrr-{name}"
+        # Ensure name is descriptive enough
+        elif len(name) < 6 and "-" not in name:
+            name = f"monsterrr-{name}-tool"
+        # Check for meaningless combinations
+        elif re.match(r"^[a-z]{3,6}-[a-z]{3,6}$", name) and not any(keyword in name for keyword in [
+            "api", "bot", "cli", "web", "data", "code", "dev", "auto", "smart", "ml", "ai", "cloud", "iot", "sec", "util"
+        ]):
+            # If it's a generic two-word combination, make it more specific
+            name = f"{name}-utility"
+        
+        # Ensure name is not empty and not too long
+        if not name:
+            name = "monsterrr-project"
+        elif len(name) > 50:
+            name = name[:50].rstrip("-")
+            
+        return name
 
     def delete_repository(self, repo_name: str, confirm: bool = False) -> None:
         """Delete a repository (requires confirm=True)."""
@@ -700,12 +753,12 @@ class GitHubService(BaseService):
         # Decision matrix for repository visibility
         visibility_rules = {
             "experiment": {
-                "general": False,      # Experiments are usually public
+                "general": True,       # Experiments are private by default
                 "internal": True,      # Internal experiments are private
                 "confidential": True   # Confidential experiments are private
             },
             "production": {
-                "general": False,      # Production code is usually public
+                "general": True,       # Production code is private by default
                 "internal": True,      # Internal production is private
                 "confidential": True   # Confidential production is private
             },
@@ -720,26 +773,44 @@ class GitHubService(BaseService):
                 "confidential": True   # Confidential demos are private
             },
             "research": {
-                "general": False,      # Research is usually public
+                "general": True,       # Research is private by default
                 "internal": True,      # Internal research is private
                 "confidential": True   # Confidential research is private
             },
             "security": {
-                "general": True,       # Security projects are usually private
+                "general": True,       # Security projects are private by default
                 "internal": True,      # Internal security is private
                 "confidential": True   # Confidential security is private
             }
         }
         
-        # Default to public if project type not found
+        # Default to private for all projects (more secure)
         project_type = project_type.lower()
         audience = audience.lower()
         
         if project_type in visibility_rules and audience in visibility_rules[project_type]:
             return visibility_rules[project_type][audience]
         else:
-            # Default to public for unknown types
-            return False
+            # Default to private for unknown types (more secure)
+            return True
+
+    def update_repository_visibility(self, repo_name: str, private: bool) -> Dict[str, Any]:
+        """
+        Update the visibility of a repository.
+        
+        Args:
+            repo_name (str): Name of the repository
+            private (bool): True for private, False for public
+            
+        Returns:
+            Dict[str, Any]: Updated repository information
+        """
+        url = f"{self.BASE_URL}/repos/{self.org}/{repo_name}"
+        data = {"private": private}
+        resp = self._request("PATCH", url, json=data)
+        result = resp.json()
+        self.logger.info(f"[GitHubService] Updated visibility of {repo_name} to {'private' if private else 'public'}")
+        return result
 
     def get_repository_insights(self, repo_name: str) -> Dict[str, Any]:
         """Get comprehensive insights about a repository."""
@@ -823,7 +894,7 @@ class GitHubService(BaseService):
             insights = {
                 "repository": repo_info.get("name"),
                 "description": repo_info.get("description", ""),
-                "visibility": "private" if repo_info.get("private", False) else "public",
+                "visibility": "private" if repo_info.get("private", True) else "public",
                 "created_at": repo_info.get("created_at"),
                 "updated_at": repo_info.get("updated_at"),
                 "language": repo_info.get("language", ""),
