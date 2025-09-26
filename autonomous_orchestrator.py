@@ -6,20 +6,31 @@ from datetime import datetime, timedelta
 import os
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from agents.idea_agent import IdeaGeneratorAgent
-from agents.maintainer_agent import MaintainerAgent
-from agents.creator_agent import CreatorAgent
+
+# Import services
 from services.github_service import GitHubService
 from services.groq_service import GroqService
 from utils.logger import setup_logger
 from utils.config import Settings
 
+# Import agents
+from agents.idea_agent import IdeaGeneratorAgent
+from agents.maintainer_agent import MaintainerAgent
+from agents.creator_agent import CreatorAgent
+
+# Initialize services and agents
 logger = setup_logger()
 settings = Settings()
 settings.validate()
+
+# Initialize Groq service first
+groq = GroqService(api_key=settings.GROQ_API_KEY, logger=logger)
+
+# Initialize GitHub service
 github = GitHubService(logger=logger)
 github.groq_client = groq  # Pass Groq client to GitHub service for use in issue analysis
-groq = GroqService(api_key=settings.GROQ_API_KEY, logger=logger)
+
+# Initialize agents
 idea_agent = IdeaGeneratorAgent(groq, logger)
 maintainer_agent = MaintainerAgent(github, groq, logger)
 creator_agent = CreatorAgent(github, logger)
@@ -50,30 +61,6 @@ Monsterrr Autonomous Orchestrator
 Runs daily: fetches ideas, plans 3 AI contributions, executes them, and maintains repos.
 Now includes enhanced memory management to prevent exceeding Render limits.
 """
-import asyncio
-import logging
-from datetime import datetime, timedelta
-import os
-import sys
-import gc
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from agents.idea_agent import IdeaGeneratorAgent
-from agents.maintainer_agent import MaintainerAgent
-from agents.creator_agent import CreatorAgent
-from services.github_service import GitHubService
-from services.groq_service import GroqService
-from utils.logger import setup_logger
-from utils.config import Settings
-
-logger = setup_logger()
-settings = Settings()
-settings.validate()
-github = GitHubService(logger=logger)
-groq = GroqService(api_key=settings.GROQ_API_KEY, logger=logger)
-github.groq_client = groq  # Pass Groq client to GitHub service for use in issue analysis
-idea_agent = IdeaGeneratorAgent(groq, logger)
-maintainer_agent = MaintainerAgent(github, groq, logger)
-creator_agent = CreatorAgent(github, logger)
 
 async def daily_orchestration():
     while True:

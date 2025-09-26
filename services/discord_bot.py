@@ -184,12 +184,23 @@ orchestrator_status = {
 }
 
 def run_orchestrator_background():
-    import autonomous_orchestrator
-    async def orchestrator_wrapper():
+    """Run orchestrator in background thread to avoid circular imports"""
+    def orchestrator_wrapper():
         while True:
             try:
+                # Import here to avoid circular imports
+                import importlib
+                autonomous_orchestrator = importlib.import_module('autonomous_orchestrator')
+                
                 orchestrator_status["last_log"] = f"Started at {datetime.now(IST)}"
-                await autonomous_orchestrator.daily_orchestration()
+                # Run one cycle of the orchestrator
+                import asyncio
+                # Create a new event loop for this thread
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(autonomous_orchestrator.daily_orchestration())
+                loop.close()
+                
                 orchestrator_status["last_run"] = datetime.now(IST).isoformat()
                 orchestrator_status["last_success"] = orchestrator_status["last_run"]
                 orchestrator_status["last_error"] = None
@@ -198,27 +209,10 @@ def run_orchestrator_background():
                 orchestrator_status["last_log"] = f"Error: {e}"
                 time.sleep(60)
     
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.create_task(orchestrator_wrapper())
-    # Only start orchestrator if not already running (avoid multiple starts)
-    if os.environ.get("MONSTERRR_ORCHESTRATOR_STARTED") != "1":
-        os.environ["MONSTERRR_ORCHESTRATOR_STARTED"] = "1"
-        def run_orchestrator_background():
-            import autonomous_orchestrator
-            async def orchestrator_wrapper():
-                while True:
-                    try:
-                        orchestrator_status["last_log"] = f"Started at {datetime.now(IST)}"
-                        await autonomous_orchestrator.daily_orchestration()
-                        orchestrator_status["last_run"] = datetime.now(IST).isoformat()
-                        orchestrator_status["last_success"] = orchestrator_status["last_run"]
-                        orchestrator_status["last_error"] = None
-                    except Exception as e:
-                        orchestrator_status["last_error"] = str(e)
-                        orchestrator_status["last_log"] = f"Error: {e}"
-                        time.sleep(60)
-            loop = asyncio.new_event_loop()
+    # Run in a separate thread
+    orchestrator_thread = threading.Thread(target=orchestrator_wrapper, daemon=True)
+    orchestrator_thread.start()
+
             asyncio.set_event_loop(loop)
             loop.create_task(orchestrator_wrapper())
             loop.run_forever()

@@ -10,6 +10,10 @@ services:
         value: .
       - key: DAILY_ACTIVITY_MODE
         value: enabled
+      - key: WEB_CONCURRENCY
+        value: 1
+    healthCheckPath: /health
+    autoDeploy: false
   - type: worker
     name: monsterrr-worker
     runtime: python
@@ -18,3 +22,5 @@ services:
     envVars:
       - key: PYTHONPATH
         value: .
+      - key: DAILY_ACTIVITY_MODE
+        value: enabled

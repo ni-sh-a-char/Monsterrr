@@ -1,5 +1,5 @@
 import sys
-from fastapi import Request
+from fastapi import Request, FastAPI
 import requests
 import threading
 import time
@@ -13,10 +13,7 @@ Entry point for starting all services (Discord bot, GitHub agent, web server, sc
 """
 
 import os
-import sys
 import logging
-import asyncio
-import gc
 from datetime import datetime, timezone, timedelta
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -29,6 +26,30 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger("monsterrr")
+
+# Initialize FastAPI app
+app = FastAPI()
+
+# Keep-alive mechanism to prevent Render from shutting down idle services
+def start_keep_alive():
+    """Start a background thread that periodically pings the service to keep it alive"""
+    def ping_self():
+        while True:
+            try:
+                # Get the port from environment variable (Render sets this)
+                port = os.environ.get("PORT", "8000")
+                url = f"http://localhost:{port}"
+                response = requests.get(url, timeout=5)
+                logger.info(f"[Keep-Alive] Ping successful: {response.status_code}")
+            except Exception as e:
+                logger.warning(f"[Keep-Alive] Ping failed: {e}")
+            # Wait 5 minutes before next ping
+            time.sleep(300)
+    
+    # Start the keep-alive thread
+    keep_alive_thread = threading.Thread(target=ping_self, daemon=True)
+    keep_alive_thread.start()
+    logger.info("[Keep-Alive] Started keep-alive mechanism")
 
 # Import services
 from services.discord_bot import run_bot as run_discord_bot
@@ -43,6 +64,18 @@ from agents.maintainer_agent import MaintainerAgent
 
 # Import autonomous orchestrator
 import autonomous_orchestrator
+
+# Health check endpoint for Render
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for Render"""
+    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+
+# Root endpoint
+@app.get("/")
+async def root():
+    """Root endpoint"""
+    return {"message": "Monsterrr — Autonomous GitHub Organization Manager is running"}
 
 def setup_memory_management():
     """Setup memory management to prevent exceeding Render limits."""
@@ -108,6 +141,9 @@ async def main():
     """Main entry point."""
     logger.info("🚀 Starting Monsterrr — Autonomous GitHub Organization Manager")
     
+    # Start keep-alive mechanism
+    start_keep_alive()
+    
     # Setup memory management
     setup_memory_management()
     log_memory_usage()
@@ -155,6 +191,7 @@ async def main():
     
     # Start autonomous orchestrator
     try:
+        import autonomous_orchestrator
         orchestrator_task = asyncio.create_task(autonomous_orchestrator.daily_orchestration())
         tasks.append(orchestrator_task)
         logger.info("✅ Autonomous orchestrator started")
