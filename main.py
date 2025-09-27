@@ -255,13 +255,47 @@ async def main():
 def run_server():
     """Run the FastAPI server."""
     import uvicorn
+    import os
     port = int(os.environ.get("PORT", "8000"))
     logger.info(f"🚀 Starting web server on port {port}")
-    uvicorn.run("main:app", host="0.0.0.0", port=port, log_level="info")
+    
+    # Configure uvicorn to bind to the correct host and port
+    uvicorn.run(
+        "main:app", 
+        host="0.0.0.0", 
+        port=port, 
+        log_level="info",
+        workers=1  # Use single worker to avoid conflicts
+    )
+
+def run_worker():
+    """Run the worker process."""
+    import asyncio
+    asyncio.run(main())
 
 if __name__ == "__main__":
-    # Check if we should run as a web server or as a worker
-    if len(sys.argv) > 1 and sys.argv[1] == "server":
-        run_server()
+    import sys
+    import os
+    
+    # Check if we're running on Render
+    if "RENDER" in os.environ:
+        # On Render, we need to determine if this is the web or worker process
+        # Based on the process name or environment variables
+        if len(sys.argv) > 1 and sys.argv[1] == "web":
+            logger.info("🚀 Starting Monsterrr web server")
+            run_server()
+        else:
+            logger.info("🤖 Starting Monsterrr worker process")
+            run_worker()
     else:
-        asyncio.run(main())
+        # Local development - check command line arguments
+        if len(sys.argv) > 1 and sys.argv[1] == "server":
+            logger.info("🚀 Starting Monsterrr web server (local)")
+            run_server()
+        elif len(sys.argv) > 1 and sys.argv[1] == "worker":
+            logger.info("🤖 Starting Monsterrr worker process (local)")
+            run_worker()
+        else:
+            # Default behavior - run worker
+            logger.info("🤖 Starting Monsterrr worker process (default)")
+            run_worker()

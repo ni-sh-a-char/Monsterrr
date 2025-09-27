@@ -13,27 +13,45 @@ from services.groq_service import GroqService
 from utils.logger import setup_logger
 from utils.config import Settings
 
-# Import agents
-from agents.idea_agent import IdeaGeneratorAgent
-from agents.maintainer_agent import MaintainerAgent
-from agents.creator_agent import CreatorAgent
-
 # Initialize services and agents
 logger = setup_logger()
 settings = Settings()
-settings.validate()
+try:
+    settings.validate()
+except Exception as e:
+    logger.error(f"Configuration validation failed: {e}")
 
 # Initialize Groq service first
-groq = GroqService(api_key=settings.GROQ_API_KEY, logger=logger)
+try:
+    groq = GroqService(api_key=settings.GROQ_API_KEY, logger=logger)
+except Exception as e:
+    logger.error(f"Failed to initialize Groq service: {e}")
+    groq = None
 
 # Initialize GitHub service
-github = GitHubService(logger=logger)
-github.groq_client = groq  # Pass Groq client to GitHub service for use in issue analysis
+try:
+    github = GitHubService(logger=logger)
+    if groq:
+        github.groq_client = groq  # Pass Groq client to GitHub service for use in issue analysis
+except Exception as e:
+    logger.error(f"Failed to initialize GitHub service: {e}")
+    github = None
 
-# Initialize agents
-idea_agent = IdeaGeneratorAgent(groq, logger)
-maintainer_agent = MaintainerAgent(github, groq, logger)
-creator_agent = CreatorAgent(github, logger)
+# Import agents after services are initialized
+try:
+    from agents.idea_agent import IdeaGeneratorAgent
+    from agents.maintainer_agent import MaintainerAgent
+    from agents.creator_agent import CreatorAgent
+    
+    # Initialize agents
+    idea_agent = IdeaGeneratorAgent(groq, logger) if groq else None
+    maintainer_agent = MaintainerAgent(github, groq, logger) if github and groq else None
+    creator_agent = CreatorAgent(github, logger) if github else None
+except Exception as e:
+    logger.error(f"Failed to initialize agents: {e}")
+    idea_agent = None
+    maintainer_agent = None
+    creator_agent = None
 
 def log_monsterrr_action(action_type, details):
     """Append an action to monsterrr_state.json for daily reporting."""
@@ -63,6 +81,11 @@ Now includes enhanced memory management to prevent exceeding Render limits.
 """
 
 async def daily_orchestration():
+    # Check if services are properly initialized
+    if not all([groq, github, idea_agent, maintainer_agent, creator_agent]):
+        logger.error("[Orchestrator] Services not properly initialized. Exiting.")
+        return
+        
     while True:
         logger.info("[Orchestrator] Starting daily AI orchestration cycle.")
         
@@ -87,26 +110,40 @@ async def daily_orchestration():
             org_stats = {}
         
         # 1. Fetch and rank new ideas (limit to 3 to prevent memory issues)
-        ideas = idea_agent.fetch_and_rank_ideas(top_n=3)
-        logger.info(f"[Orchestrator] Fetched and ranked {len(ideas)} ideas.")
-        log_monsterrr_action("ideas_fetched", {"count": len(ideas), "ideas": [i.get('name','') for i in ideas]})
-
+        try:
+            ideas = idea_agent.fetch_and_rank_ideas(top_n=3)
+            logger.info(f"[Orchestrator] Fetched and ranked {len(ideas)} ideas.")
+            log_monsterrr_action("ideas_fetched", {"count": len(ideas), "ideas": [i.get('name','') for i in ideas]})
+        except Exception as e:
+            logger.error(f"[Orchestrator] Error fetching ideas: {e}")
+            ideas = []
+        
         # 2. Plan 3 daily contributions (limit to prevent memory issues)
-        plan = maintainer_agent.plan_daily_contributions(num_contributions=3)
-        logger.info(f"[Orchestrator] Planned {len(plan)} daily contributions.")
-        log_monsterrr_action("daily_plan", {"count": len(plan), "plan": plan})
-
+        try:
+            plan = maintainer_agent.plan_daily_contributions(num_contributions=3)
+            logger.info(f"[Orchestrator] Planned {len(plan)} daily contributions.")
+            log_monsterrr_action("daily_plan", {"count": len(plan), "plan": plan})
+        except Exception as e:
+            logger.error(f"[Orchestrator] Error planning contributions: {e}")
+            plan = []
+        
         # 3. Execute the plan with memory management
-        logger.info("[Orchestrator] Executing daily plan with memory management.")
-        maintainer_agent.execute_daily_plan(plan, creator_agent=creator_agent)
-        logger.info("[Orchestrator] Executed daily plan.")
-        log_monsterrr_action("plan_executed", {"plan": plan})
-
+        try:
+            logger.info("[Orchestrator] Executing daily plan with memory management.")
+            maintainer_agent.execute_daily_plan(plan, creator_agent=creator_agent)
+            logger.info("[Orchestrator] Executed daily plan.")
+            log_monsterrr_action("plan_executed", {"plan": plan})
+        except Exception as e:
+            logger.error(f"[Orchestrator] Error executing plan: {e}")
+        
         # 4. Perform repo maintenance
-        logger.info("[Orchestrator] Performing repo maintenance.")
-        maintainer_agent.perform_maintenance()
-        logger.info("[Orchestrator] Performed repo maintenance.")
-        log_monsterrr_action("maintenance", {"status": "completed"})
+        try:
+            logger.info("[Orchestrator] Performing repo maintenance.")
+            maintainer_agent.perform_maintenance()
+            logger.info("[Orchestrator] Performed repo maintenance.")
+            log_monsterrr_action("maintenance", {"status": "completed"})
+        except Exception as e:
+            logger.error(f"[Orchestrator] Error performing maintenance: {e}")
         
         # Force garbage collection to prevent memory issues
         collected = gc.collect()

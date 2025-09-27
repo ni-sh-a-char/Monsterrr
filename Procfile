@@ -1,2 +1,2 @@
-web: python -m main server
-worker: python -m main
+web: python -m main web
+worker: python -m main worker

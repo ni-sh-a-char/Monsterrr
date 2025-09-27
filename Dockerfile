@@ -17,5 +17,7 @@ COPY . .
 # Expose port
 EXPOSE 8000
 
-# Start FastAPI (and Discord bot via main.py startup event)
-CMD ["python", "main.py"]
+# Start command - can be overridden at runtime
+# For web service: docker run -e START_MODE=web monsterrr
+# For worker service: docker run -e START_MODE=worker monsterrr
+CMD ["sh", "-c", "if [ \"$START_MODE\" = \"web\" ]; then python -m main web; else python -m main worker; fi"]

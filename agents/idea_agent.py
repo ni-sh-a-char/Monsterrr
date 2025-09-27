@@ -36,16 +36,45 @@ class IdeaGeneratorAgent:
             import requests
             url = f"https://www.reddit.com/r/{subreddit}/top/.json?limit=10&t=week"
             headers = {"User-Agent": "MonsterrrBot/1.0"}
-            resp = requests.get(url, headers=headers, timeout=10)
-            posts = resp.json()["data"]["children"]
-            return [{
-                "name": post["data"]["title"],
-                "description": post["data"].get("selftext", "")
-            } for post in posts]
+            resp = requests.get(url, headers=headers, timeout=15)  # Increased timeout
+            # Check if response is valid JSON
+            if resp.status_code == 200:
+                try:
+                    # Add additional validation for empty or invalid responses
+                    content = resp.text.strip()
+                    if not content:
+                        self.logger.warning(f"[IdeaGeneratorAgent] Reddit API returned empty response for {subreddit}")
+                        return []
+                    if content.startswith('<'):  # HTML response instead of JSON
+                        self.logger.warning(f"[IdeaGeneratorAgent] Reddit API returned HTML instead of JSON for {subreddit}")
+                        return []
+                    data = resp.json()
+                    if "data" in data and "children" in data["data"]:
+                        posts = data["data"]["children"]
+                        return [{
+                            "name": post["data"]["title"],
+                            "description": post["data"].get("selftext", "")[:500] if post["data"].get("selftext") else ""
+                        } for post in posts]
+                    else:
+                        self.logger.warning(f"[IdeaGeneratorAgent] Reddit API returned unexpected structure for {subreddit}")
+                        return []
+                except ValueError as e:
+                    self.logger.error(f"[IdeaGeneratorAgent] Reddit API returned invalid JSON for {subreddit}: {e}")
+                    self.logger.debug(f"[IdeaGeneratorAgent] Reddit response content: {resp.text[:500]}")
+                    return []
+            else:
+                self.logger.error(f"[IdeaGeneratorAgent] Reddit API returned status {resp.status_code} for {subreddit}")
+                if resp.status_code == 429:  # Rate limiting
+                    self.logger.warning("[IdeaGeneratorAgent] Reddit rate limiting detected, skipping Reddit fetch")
+                    return []
+                return []
+        except requests.exceptions.RequestException as e:
+            self.logger.error(f"[IdeaGeneratorAgent] Reddit network error: {e}")
+            return []
         except Exception as e:
             self.logger.error(f"[IdeaGeneratorAgent] Reddit fetch error: {e}")
             return []
-    
+
     def fetch_trending_github_topics(self) -> list:
         """Fetch trending topics from GitHub."""
         try:
@@ -68,7 +97,7 @@ class IdeaGeneratorAgent:
         except Exception as e:
             self.logger.error(f"[IdeaGeneratorAgent] GitHub topics fetch error: {e}")
             return []
-    
+
     def fetch_trending_devto_week(self) -> list:
         """Fetch top articles from Dev.to for the week."""
         try:
@@ -83,7 +112,7 @@ class IdeaGeneratorAgent:
         except Exception as e:
             self.logger.error(f"[IdeaGeneratorAgent] Dev.to week fetch error: {e}")
             return []
-    
+
     def fetch_trending_hackernews_month(self) -> list:
         """Fetch top stories from Hacker News for the month."""
         try:
@@ -105,7 +134,7 @@ class IdeaGeneratorAgent:
         except Exception as e:
             self.logger.error(f"[IdeaGeneratorAgent] HackerNews month fetch error: {e}")
             return []
-    
+
     def fetch_trending_stackoverflow(self) -> list:
         """Fetch trending tags from Stack Overflow."""
         try:
@@ -336,23 +365,25 @@ class IdeaGeneratorAgent:
                 time.sleep(2)
                 return []
         
+        # Temporarily disable Reddit calls due to rate limiting issues
         github = rate_limited_call(self.fetch_trending_github)
         hn = rate_limited_call(self.fetch_trending_hackernews)
         devto = rate_limited_call(self.fetch_trending_devto)
         producthunt = rate_limited_call(self.fetch_trending_producthunt)
-        reddit_ml = rate_limited_call(self.fetch_trending_reddit, "MachineLearning")
-        reddit_ai = rate_limited_call(self.fetch_trending_reddit, "Artificial")
+        
+        # Only fetch from Reddit if we have a valid Reddit API setup
+        # For now, let's skip Reddit to avoid errors
+        reddit_ml = []  # Disabled due to rate limiting
+        reddit_ai = []  # Disabled due to rate limiting
+        reddit_programming = []  # Disabled due to rate limiting
+        reddit_webdev = []  # Disabled due to rate limiting
+        reddit_python = []  # Disabled due to rate limiting
+        reddit_javascript = []  # Disabled due to rate limiting
+        
         github_topics = rate_limited_call(self.fetch_trending_github_topics)
         devto_week = rate_limited_call(self.fetch_trending_devto_week)
         hn_month = rate_limited_call(self.fetch_trending_hackernews_month)
         stackoverflow = rate_limited_call(self.fetch_trending_stackoverflow)
-        
-        # Additional sources for more diverse ideas (with longer delays to prevent rate limiting)
-        time.sleep(2)  # Extra delay before additional calls
-        reddit_programming = rate_limited_call(self.fetch_trending_reddit, "programming")
-        reddit_webdev = rate_limited_call(self.fetch_trending_reddit, "webdev")
-        reddit_python = rate_limited_call(self.fetch_trending_reddit, "Python")
-        reddit_javascript = rate_limited_call(self.fetch_trending_reddit, "javascript")
         
         # Web trends for enhanced idea generation
         web_trends = rate_limited_call(self.fetch_web_trends)
@@ -369,6 +400,20 @@ class IdeaGeneratorAgent:
                 deduped.append(idea)
                 seen.add(name)
         
+        # If we have no ideas, return early
+        if not deduped:
+            self.logger.info("[IdeaGeneratorAgent] No ideas fetched from sources.")
+            state = self._load_state()
+            state['ideas'] = {
+                'generated_at': datetime.utcnow().isoformat(),
+                'top_ideas': []
+            }
+            self._save_state(state)
+            return []
+        
+        # Limit the number of ideas to prevent overwhelming the LLM
+        deduped = deduped[:20]  # Limit to 20 ideas max
+        
         prompt = (
             f"Given the following trending open-source project ideas, summarize, filter for uniqueness and impact, "
             f"and rank the top {top_n} ideas. For each, provide: name, description, detailed_description, tech stack, difficulty (easy/med/hard), "
@@ -377,25 +422,43 @@ class IdeaGeneratorAgent:
             f"The detailed_description should be 2-3 sentences explaining the problem the project solves. "
             f"The features should be specific functionalities the project will have. "
             f"Each roadmap step should be a concrete implementation task."
-            f"\n\nIMPORTANT: Do NOT use tables in your answer. Instead, present all lists and structured data as professional, visually clear bullet points. Each idea should be a separate bullet with its details as sub-bullets."
+            f"\n\nIMPORTANT: Return ONLY a valid JSON array. No extra text, no markdown formatting, no explanations. "
+            f"Example format: [{{\"name\": \"project-name\", \"description\": \"description\", \"detailed_description\": \"detailed description\", \"tech_stack\": [\"tech1\", \"tech2\"], \"difficulty\": \"med\", \"estimated_dev_time\": 4, \"features\": [\"feature1\", \"feature2\"], \"roadmap\": [\"step1\", \"step2\"]}}]"
             f"\n\nIMPORTANT: The name should be a sensible, professional project name that follows standard naming conventions (lowercase, hyphens for spaces, no special characters). Examples: 'api-documentation-generator', 'machine-learning-dashboard', 'code-review-automation'."
             f"\n\nIMPORTANT: The name should clearly indicate what the project does and should be descriptive. Avoid generic names like 'project' or 'app'. The name should be between 6-30 characters and should clearly communicate the project's purpose."
             f"\n\nIdeas: {json.dumps(deduped)[:4000]}"
         )
         try:
-            self.logger.info(f"[IdeaGeneratorAgent] Groq ranking prompt: {prompt[:1000]}")
+            self.logger.info(f"[IdeaGeneratorAgent] Groq ranking prompt: {prompt[:1000]}...")
             groq_response = self.groq_client.groq_llm(prompt)
             self.logger.info(f"[IdeaGeneratorAgent] Groq raw response: {groq_response[:2000]}")
+            
+            # Try to parse the response as JSON
             try:
-                ideas = json.loads(groq_response)
+                # First, try to extract JSON from the response
+                import re
+                # Look for JSON array pattern
+                json_match = re.search(r'\[.*\]', groq_response, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group(0)
+                    ideas = json.loads(json_str)
+                else:
+                    # If no JSON array found, try parsing the whole response
+                    ideas = json.loads(groq_response)
             except Exception as e:
                 self.logger.error(f"[IdeaGeneratorAgent] Groq response not valid JSON: {e}. Re-prompting for concise valid JSON.")
                 # Re-prompt Groq for concise valid JSON
-                retry_prompt = prompt + "\n\nReturn ONLY a short valid JSON list of ideas, no extra text. If you cannot, return []."
+                retry_prompt = prompt + "\n\nReturn ONLY a short valid JSON array, no extra text. If you cannot, return []."
                 groq_response2 = self.groq_client.groq_llm(retry_prompt)
                 self.logger.info(f"[IdeaGeneratorAgent] Groq retry raw response: {groq_response2[:2000]}")
                 try:
-                    ideas = json.loads(groq_response2)
+                    # Try to extract JSON from retry response
+                    json_match = re.search(r'\[.*\]', groq_response2, re.DOTALL)
+                    if json_match:
+                        json_str = json_match.group(0)
+                        ideas = json.loads(json_str)
+                    else:
+                        ideas = json.loads(groq_response2)
                 except Exception as e2:
                     self.logger.error(f"[IdeaGeneratorAgent] Groq retry response still not valid JSON: {e2}. Returning empty list.")
                     ideas = []

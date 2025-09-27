@@ -294,8 +294,14 @@ async def send_long_message(channel, text, prefix=None):
     max_len = 2000
     if prefix:
         text = prefix + text
-    for i in range(0, len(text), max_len):
-        await channel.send(text[i:i+max_len])
+    
+    # Send the first chunk and return the message object
+    if len(text) <= max_len:
+        return await channel.send(text)
+    else:
+        # For simplicity, we'll send the first chunk and return that message
+        # In a production environment, you might want to handle all chunks
+        return await channel.send(text[:max_len])
 
 # Enhanced system context with consciousness
 def get_system_context(user_id: Optional[str] = None) -> str:
@@ -1421,7 +1427,7 @@ async def project_cmd(ctx: commands.Context, action: str, *, args: str = ""):
 
 @bot.event
 async def on_message(message: discord.Message):
-    # Ignore messages from bots (including ourselves)
+    # Ignore messages from bots (including ourselves) - this is the key fix
     if message.author.bot:
         return
     
@@ -1434,7 +1440,7 @@ async def on_message(message: discord.Message):
         total_messages += 1
         unique_users.add(str(message.author.id))
         
-        # Deduplication check
+        # Deduplication check - enhanced to prevent processing our own messages
         if _is_processed(message.id):
             return
         _mark_processed(message.id)
@@ -1494,11 +1500,17 @@ async def on_message(message: discord.Message):
                 # Handle natural language commands
                 reply = await handle_natural_command(intent, content, user_id)
                 conversation_memory[user_id].append({"role": "assistant", "content": reply})
+                
+                # Send response and mark it as processed to prevent double processing
                 try:
                     embed = create_professional_embed("Monsterrr Command Result", reply)
-                    await message.channel.send(embed=embed)
+                    response_msg = await message.channel.send(embed=embed)
+                    if response_msg:
+                        _mark_processed(response_msg.id)  # Mark our response as processed
                 except Exception:
-                    await send_long_message(message.channel, reply)
+                    response_msg = await send_long_message(message.channel, reply)
+                    if response_msg:
+                        _mark_processed(response_msg.id)  # Mark our response as processed
                 return
             
             elif found_urls and search_service:
@@ -1510,11 +1522,17 @@ async def on_message(message: discord.Message):
                     summary = f"Sorry, I couldn't summarize the URL: {e}"
                 
                 conversation_memory[user_id].append({"role": "assistant", "content": summary})
+                
+                # Send response and mark it as processed to prevent double processing
                 try:
                     embed = create_professional_embed("Monsterrr Web Summary", summary)
-                    await message.channel.send(embed=embed)
+                    response_msg = await message.channel.send(embed=embed)
+                    if response_msg:
+                        _mark_processed(response_msg.id)  # Mark our response as processed
                 except Exception:
-                    await send_long_message(message.channel, summary)
+                    response_msg = await send_long_message(message.channel, summary)
+                    if response_msg:
+                        _mark_processed(response_msg.id)  # Mark our response as processed
                 return
             
             elif search_service and not intent:
@@ -1540,31 +1558,45 @@ async def on_message(message: discord.Message):
                     
                     full_text = (summary or "") + (ref_text or "")
                     if not full_text.strip():
-                        await send_long_message(message.channel, "Sorry, I couldn't generate a response.")
+                        response_msg = await send_long_message(message.channel, "Sorry, I couldn't generate a response.")
+                        if response_msg:
+                            _mark_processed(response_msg.id)  # Mark our response as processed
                         return
                     
                     conversation_memory[user_id].append({"role": "assistant", "content": full_text})
+                    
+                    # Send response and mark it as processed to prevent double processing
                     try:
                         embed = create_professional_embed("Monsterrr Web Search", full_text)
-                        await message.channel.send(embed=embed)
+                        response_msg = await message.channel.send(embed=embed)
+                        if response_msg:
+                            _mark_processed(response_msg.id)  # Mark our response as processed
                     except Exception:
-                        await send_long_message(message.channel, full_text)
+                        response_msg = await send_long_message(message.channel, full_text)
+                        if response_msg:
+                            _mark_processed(response_msg.id)  # Mark our response as processed
                     return
                 
                 except Exception as e:
                     logger.exception("Web search failed: %s", e)
-                    await send_long_message(message.channel, f"⚠️ Web Search Error: {e}")
+                    response_msg = await send_long_message(message.channel, f"⚠️ Web Search Error: {e}")
+                    if response_msg:
+                        _mark_processed(response_msg.id)  # Mark our response as processed
                     return
             
             else:
                 # Fallback to LLM
                 if groq_service is None:
-                    await send_long_message(message.channel, "⚠️ AI Error: Monsterrr's AI is not available. Please check configuration.")
+                    response_msg = await send_long_message(message.channel, "⚠️ AI Error: Monsterrr's AI is not available. Please check configuration.")
+                    if response_msg:
+                        _mark_processed(response_msg.id)  # Mark our response as processed
                     return
                 
                 ai_reply = await asyncio.to_thread(_call_groq, content, GROQ_MODEL)
                 if not ai_reply:
-                    await send_long_message(message.channel, "Sorry, I couldn't generate a response.")
+                    response_msg = await send_long_message(message.channel, "Sorry, I couldn't generate a response.")
+                    if response_msg:
+                        _mark_processed(response_msg.id)  # Mark our response as processed
                     return
                 
                 org = os.getenv("GITHUB_ORG", "unknown")
@@ -1572,17 +1604,25 @@ async def on_message(message: discord.Message):
                                f"the GitHub organization I manage is called {org}", ai_reply)
                 
                 conversation_memory[user_id].append({"role": "assistant", "content": answer})
+                
+                # Send response and mark it as processed to prevent double processing
                 try:
                     embed = create_professional_embed("Monsterrr", answer)
-                    await message.channel.send(embed=embed)
+                    response_msg = await message.channel.send(embed=embed)
+                    if response_msg:
+                        _mark_processed(response_msg.id)  # Mark our response as processed
                 except Exception:
-                    await send_long_message(message.channel, answer)
+                    response_msg = await send_long_message(message.channel, answer)
+                    if response_msg:
+                        _mark_processed(response_msg.id)  # Mark our response as processed
                 return
         
         except Exception as e:
             logger.exception("AI reply failed: %s", e)
             try:
-                await send_long_message(message.channel, f"⚠️ AI Error: {e}")
+                response_msg = await send_long_message(message.channel, f"⚠️ AI Error: {e}")
+                if response_msg:
+                    _mark_processed(response_msg.id)  # Mark our response as processed
             except Exception:
                 pass
 

@@ -153,10 +153,28 @@ class GroqService:
                     if expect_json:
                         try:
                             import json
-                            return json.loads(content)
-                        except Exception:
-                            self.logger.error("Groq response was not valid JSON after retry.")
-                            raise RuntimeError("Groq response was not valid JSON.")
+                            # Try to extract JSON from the response if it contains extra text
+                            import re
+                            # Look for JSON object or array pattern
+                            json_match = re.search(r'(\{.*\}|\[.*\])', content, re.DOTALL)
+                            if json_match:
+                                json_str = json_match.group(1)
+                                return json.loads(json_str)
+                            else:
+                                # If no JSON pattern found, try to parse the whole content
+                                return json.loads(content)
+                        except Exception as e:
+                            self.logger.error(f"Groq response was not valid JSON: {e}")
+                            self.logger.debug(f"Groq response content: {content}")
+                            # Try to fix common JSON issues
+                            try:
+                                # Fix common issues like single quotes, trailing commas
+                                fixed_content = content.replace("'", '"')
+                                fixed_content = re.sub(r',(\s*[}\]])', r'\1', fixed_content)  # Remove trailing commas
+                                return json.loads(fixed_content)
+                            except Exception as e2:
+                                self.logger.error(f"Groq response still not valid JSON after fixes: {e2}")
+                                raise RuntimeError("Groq response was not valid JSON.")
                     return content
                 else:
                     self.logger.error(f"Groq API returned no choices: {data}")
