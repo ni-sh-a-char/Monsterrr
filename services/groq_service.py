@@ -35,7 +35,6 @@ class GroqService:
         if self.logger:
             self.logger.info(f"[GroqService] Initialized with model: {self.model}, API key: {redacted_key}")
 
-
     def groq_llm(self, prompt: str, model: Optional[str] = None, system_prompt: Optional[str] = None, stream: bool = False, expect_json: bool = False, **kwargs) -> str:
         """
         Send a prompt to Groq LLM and return the response.
@@ -118,11 +117,21 @@ class GroqService:
                             wait_match = re.search(r"try again in ([\d\.]+)s", message)
                             if wait_match:
                                 wait_time = float(wait_match.group(1))
-                                time.sleep(min(wait_time, 60))  # Cap at 60 seconds
+                                # Add some buffer time to the wait time
+                                wait_time = min(wait_time + 5, 300)  # Cap at 5 minutes
+                                self.logger.info(f"[GroqService] Rate limited. Waiting {wait_time} seconds before retry.")
+                                time.sleep(wait_time)
                             else:
-                                time.sleep(min(2 ** attempt, 30))  # Exponential backoff, max 30s
-                        except Exception:
-                            time.sleep(min(2 ** attempt, 30))  # Fallback to exponential backoff
+                                # Default wait time for rate limiting
+                                wait_time = min(2 ** attempt * 10, 300)  # Exponential backoff, max 5 minutes
+                                self.logger.info(f"[GroqService] Rate limited. Waiting {wait_time} seconds before retry.")
+                                time.sleep(wait_time)
+                        except Exception as e:
+                            self.logger.warning(f"[GroqService] Error parsing rate limit wait time: {e}")
+                            # Default wait time
+                            wait_time = min(2 ** attempt * 10, 300)  # Exponential backoff, max 5 minutes
+                            self.logger.info(f"[GroqService] Rate limited. Waiting {wait_time} seconds before retry.")
+                            time.sleep(wait_time)
                     else:
                         time.sleep(2 ** attempt)
                     continue
@@ -189,7 +198,8 @@ class GroqService:
             except Exception as e:
                 self.logger.error(f"GroqService error: {e}")
                 attempt += 1
-                time.sleep(2 ** attempt)
+                if attempt < self.max_retries:
+                    time.sleep(2 ** attempt)
         raise RuntimeError("Groq API call failed after retries.")
 
     def _stream_response(self, payload: Dict[str, Any], headers: Dict[str, str]) -> Generator[str, None, None]:

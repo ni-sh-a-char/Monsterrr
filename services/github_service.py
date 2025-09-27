@@ -411,6 +411,10 @@ class GitHubService(BaseService):
                     self.logger.warning(f"[GitHubService] Repository {name} already exists. Getting details instead.")
                     try:
                         existing_repo = self.get_repository(name)
+                        # Ensure the existing repository has the correct visibility
+                        if existing_repo.get("private", True) != private:
+                            self.logger.info(f"[GitHubService] Updating visibility of existing repository {name}")
+                            self.update_repository_visibility(name, private)
                         return existing_repo
                     except Exception as e2:
                         self.logger.error(f"[GitHubService] Error getting existing repository {name}: {e2}")

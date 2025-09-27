@@ -1,10 +1,10 @@
 # Render deployment configuration for Monsterrr
 services:
   - type: web
-    name: monsterrr-api
+    name: monsterrr-all-in-one
     runtime: python
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "python -m main web"
+    startCommand: "python start_monsterrr.py"
     envVars:
       - key: PYTHONPATH
         value: .
@@ -12,15 +12,9 @@ services:
         value: enabled
       - key: WEB_CONCURRENCY
         value: 1
+      - key: START_MODE
+        value: all
+      - key: MONSTERRR_MODE
+        value: all
     healthCheckPath: /health
     autoDeploy: false
-  - type: worker
-    name: monsterrr-worker
-    runtime: python
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "python -m main worker"
-    envVars:
-      - key: PYTHONPATH
-        value: .
-      - key: DAILY_ACTIVITY_MODE
-        value: enabled

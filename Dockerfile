@@ -17,7 +17,10 @@ COPY . .
 # Expose port
 EXPOSE 8000
 
-# Start command - can be overridden at runtime
+# Unified startup command that can run in different modes
 # For web service: docker run -e START_MODE=web monsterrr
-# For worker service: docker run -e START_MODE=worker monsterrr
-CMD ["sh", "-c", "if [ \"$START_MODE\" = \"web\" ]; then python -m main web; else python -m main worker; fi"]
+# For worker service: docker run -e START_MODE=worker
+# For hybrid (both): docker run -e START_MODE=hybrid monsterrr
+# For all-in-one (worker in background, web in foreground): docker run -e START_MODE=all monsterrr
+# Default (no env var): runs in all-in-one mode
+CMD ["python", "start_monsterrr.py"]

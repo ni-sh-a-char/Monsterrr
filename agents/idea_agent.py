@@ -331,7 +331,7 @@ class IdeaGeneratorAgent:
             name = f"monsterrr-{name}-tool"
         # Check for meaningless combinations
         elif re.match(r"^[a-z]{3,6}-[a-z]{3,6}$", name) and not any(keyword in name for keyword in [
-            "api", "bot", "cli", "web", "data", "code", "dev", "auto", "smart", "ml", "ai", "cloud", "iot", "sec"
+            "api", "bot", "cli", "web", "data", "code", "dev", "auto", "smart", "ml", "ai", "cloud", "iot", "sec", "util"
         ]):
             # If it's a generic two-word combination, make it more specific
             name = f"{name}-utility"

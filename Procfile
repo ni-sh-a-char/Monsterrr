@@ -1,2 +1,2 @@
-web: python -m main web
-worker: python -m main worker
+web: python start_monsterrr.py
+worker: python start_monsterrr.py

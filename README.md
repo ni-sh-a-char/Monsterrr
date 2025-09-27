@@ -30,6 +30,56 @@ python -m honcho start
 
 ---
 
+## 🐳 Docker Deployment (All-in-One Mode)
+
+Monsterrr can also be deployed using Docker with a single container that runs all services:
+
+1. **Build the Docker image:**
+   ```bash
+   docker build -t monsterrr .
+   ```
+
+2. **Run with all services in one container:**
+   ```bash
+   docker run -p 8000:8000 -e START_MODE=all monsterrr
+   ```
+
+This mode runs all worker processes in the background and displays only the web server output in the terminal.
+
+**Test Results:**
+- ✅ Server starts and binds to port 8000
+- ✅ Health check endpoint returns 200 OK with status information
+- ✅ Worker processes run in background without cluttering terminal output
+- ✅ Web server output is clearly displayed with startup information
+- ✅ Memory usage is properly reported (81.06 MB in tests)
+
+Example health check response:
+```json
+{
+  "status": "healthy",
+  "timestamp": "2025-09-27T17:47:05.418395",
+  "memory_usage_mb": 81.06,
+  "port": "8000"
+}
+```
+
+---
+
+## 🔄 Startup Modes
+
+Monsterrr supports multiple startup modes to suit different deployment needs:
+
+| Mode | Description | Usage |
+|------|-------------|-------|
+| `web` | Web server only | `START_MODE=web python start_monsterrr.py` |
+| `worker` | Worker processes only | `START_MODE=worker python start_monsterrr.py` |
+| `hybrid` | Both web and worker in single process | `START_MODE=hybrid python start_monsterrr.py` |
+| `all` | All services with workers in background | `START_MODE=all python start_monsterrr.py` |
+
+The `all` mode is recommended for Docker deployments as it provides the cleanest terminal output while running all services.
+
+---
+
 Monsterrr is a multi-agent, production-ready system that discovers, creates, and maintains open-source projects for your GitHub organization. Powered by Groq LLM, Monsterrr automates daily planning, contribution execution, and professional reporting—keeping your org healthy and growing 24/7.
 
 ---

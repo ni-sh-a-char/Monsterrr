@@ -6,13 +6,13 @@ import time
 import gc
 import psutil
 import asyncio
+import os
 # All FastAPI endpoints must be defined after app initialization
 """
 Monsterrr — Autonomous GitHub Organization Manager
 Entry point for starting all services (Discord bot, GitHub agent, web server, scheduler).
 """
 
-import os
 import logging
 from datetime import datetime, timezone, timedelta
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -30,6 +30,29 @@ logger = logging.getLogger("monsterrr")
 # Initialize FastAPI app
 app = FastAPI()
 
+# Add startup event to log when server is ready
+@app.on_event("startup")
+async def startup_event():
+    import os
+    port = os.environ.get("PORT", "8000")
+    logger.info("========================================")
+    logger.info("🎉 MONSTERRR WEB SERVER STARTUP COMPLETE")
+    logger.info("========================================")
+    logger.info(f"✅ Server listening on port {port}")
+    logger.info(f"✅ Health check: http://0.0.0.0:{port}/health")
+    logger.info(f"✅ API docs: http://0.0.0.0:{port}/docs")
+    logger.info(f"✅ Root endpoint: http://0.0.0.0:{port}/")
+    logger.info("========================================")
+    logger.info("🚀 MONSTERRR IS READY TO SERVE REQUESTS")
+    logger.info("========================================")
+
+# Add shutdown event for clean shutdown logging
+@app.on_event("shutdown")
+async def shutdown_event():
+    logger.info("========================================")
+    logger.info("🛑 MONSTERRR WEB SERVER SHUTTING DOWN")
+    logger.info("========================================")
+
 # Keep-alive mechanism to prevent Render from shutting down idle services
 def start_keep_alive():
     """Start a background thread that periodically pings the service to keep it alive"""
@@ -38,7 +61,7 @@ def start_keep_alive():
             try:
                 # Get the port from environment variable (Render sets this)
                 port = os.environ.get("PORT", "8000")
-                url = f"http://localhost:{port}"
+                url = f"http://localhost:{port}/health"
                 response = requests.get(url, timeout=5)
                 logger.info(f"[Keep-Alive] Ping successful: {response.status_code}")
             except Exception as e:
@@ -50,7 +73,8 @@ def start_keep_alive():
     try:
         keep_alive_thread = threading.Thread(target=ping_self, daemon=True)
         keep_alive_thread.start()
-        logger.info("[Keep-Alive] Started keep-alive mechanism")
+        port = os.environ.get("PORT", "8000")
+        logger.info(f"[Keep-Alive] Started keep-alive mechanism - will ping http://localhost:{port}/health every 5 minutes")
     except Exception as e:
         logger.error(f"[Keep-Alive] Failed to start keep-alive mechanism: {e}")
 
@@ -72,13 +96,33 @@ import autonomous_orchestrator
 @app.get("/health")
 async def health_check():
     """Health check endpoint for Render"""
-    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+    import psutil
+    import os
+    process = psutil.Process(os.getpid())
+    memory_mb = process.memory_info().rss / 1024 / 1024
+    
+    return {
+        "status": "healthy", 
+        "timestamp": datetime.now().isoformat(),
+        "memory_usage_mb": round(memory_mb, 2),
+        "port": os.environ.get("PORT", "8000")
+    }
 
 # Root endpoint
 @app.get("/")
 async def root():
     """Root endpoint"""
-    return {"message": "Monsterrr — Autonomous GitHub Organization Manager is running"}
+    import os
+    port = os.environ.get("PORT", "8000")
+    return {
+        "message": "Monsterrr — Autonomous GitHub Organization Manager is running",
+        "status": "operational",
+        "port": port,
+        "endpoints": {
+            "health": f"http://0.0.0.0:{port}/health",
+            "docs": f"http://0.0.0.0:{port}/docs"
+        }
+    }
 
 def setup_memory_management():
     """Setup memory management to prevent exceeding Render limits."""
@@ -257,20 +301,30 @@ def run_server():
     import uvicorn
     import os
     port = int(os.environ.get("PORT", "8000"))
-    logger.info(f"🚀 Starting web server on port {port}")
+    logger.info("========================================")
+    logger.info("🚀 STARTING MONSTERRR WEB SERVER")
+    logger.info("========================================")
+    logger.info(f"🌍 Binding to host 0.0.0.0 on port {port}")
+    logger.info(f"🔍 Health check endpoint: http://0.0.0.0:{port}/health")
+    logger.info(f"📚 API documentation: http://0.0.0.0:{port}/docs")
+    logger.info("🔄 Starting uvicorn server...")
+    logger.info("========================================")
     
-    # Configure uvicorn to bind to the correct host and port
-    uvicorn.run(
-        "main:app", 
-        host="0.0.0.0", 
-        port=port, 
-        log_level="info",
-        workers=1  # Use single worker to avoid conflicts
-    )
+    try:
+        # Configure uvicorn to bind to the correct host and port
+        uvicorn.run(
+            "main:app", 
+            host="0.0.0.0", 
+            port=port, 
+            log_level="info",
+            workers=1  # Use single worker to avoid conflicts
+        )
+    except Exception as e:
+        logger.error(f"❌ Failed to start server on port {port}: {e}")
+        raise
 
 def run_worker():
     """Run the worker process."""
-    import asyncio
     asyncio.run(main())
 
 if __name__ == "__main__":
