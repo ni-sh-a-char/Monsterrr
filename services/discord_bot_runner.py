@@ -33,5 +33,9 @@ def run_bot_with_retry():
                 logger.error("Max retries reached. Discord bot failed to start.")
                 raise
 
+def run_bot():
+    """Run the Discord bot (wrapper for compatibility)"""
+    run_bot_with_retry()
+
 if __name__ == "__main__":
     run_bot_with_retry()

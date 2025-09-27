@@ -322,25 +322,40 @@ class IdeaGeneratorAgent:
             List of top N idea dicts with metadata.
         """
         self.logger.info("[IdeaGeneratorAgent] Fetching trending ideas from sources.")
-        github = self.fetch_trending_github()
-        hn = self.fetch_trending_hackernews()
-        devto = self.fetch_trending_devto()
-        producthunt = self.fetch_trending_producthunt()
-        reddit_ml = self.fetch_trending_reddit("MachineLearning")
-        reddit_ai = self.fetch_trending_reddit("Artificial")
-        github_topics = self.fetch_trending_github_topics()
-        devto_week = self.fetch_trending_devto_week()
-        hn_month = self.fetch_trending_hackernews_month()
-        stackoverflow = self.fetch_trending_stackoverflow()
         
-        # Additional sources for more diverse ideas
-        reddit_programming = self.fetch_trending_reddit("programming")
-        reddit_webdev = self.fetch_trending_reddit("webdev")
-        reddit_python = self.fetch_trending_reddit("Python")
-        reddit_javascript = self.fetch_trending_reddit("javascript")
+        # Add rate limiting delay between API calls to prevent rate limiting
+        def rate_limited_call(func, *args, **kwargs):
+            try:
+                result = func(*args, **kwargs)
+                # Add a small delay between calls to prevent rate limiting
+                time.sleep(1)
+                return result
+            except Exception as e:
+                self.logger.error(f"[IdeaGeneratorAgent] Error in {func.__name__}: {e}")
+                # Add a longer delay on error to prevent further rate limiting
+                time.sleep(2)
+                return []
+        
+        github = rate_limited_call(self.fetch_trending_github)
+        hn = rate_limited_call(self.fetch_trending_hackernews)
+        devto = rate_limited_call(self.fetch_trending_devto)
+        producthunt = rate_limited_call(self.fetch_trending_producthunt)
+        reddit_ml = rate_limited_call(self.fetch_trending_reddit, "MachineLearning")
+        reddit_ai = rate_limited_call(self.fetch_trending_reddit, "Artificial")
+        github_topics = rate_limited_call(self.fetch_trending_github_topics)
+        devto_week = rate_limited_call(self.fetch_trending_devto_week)
+        hn_month = rate_limited_call(self.fetch_trending_hackernews_month)
+        stackoverflow = rate_limited_call(self.fetch_trending_stackoverflow)
+        
+        # Additional sources for more diverse ideas (with longer delays to prevent rate limiting)
+        time.sleep(2)  # Extra delay before additional calls
+        reddit_programming = rate_limited_call(self.fetch_trending_reddit, "programming")
+        reddit_webdev = rate_limited_call(self.fetch_trending_reddit, "webdev")
+        reddit_python = rate_limited_call(self.fetch_trending_reddit, "Python")
+        reddit_javascript = rate_limited_call(self.fetch_trending_reddit, "javascript")
         
         # Web trends for enhanced idea generation
-        web_trends = self.fetch_web_trends()
+        web_trends = rate_limited_call(self.fetch_web_trends)
         
         # Combine all ideas
         all_ideas = github + hn + devto + producthunt + reddit_ml + reddit_ai + github_topics + devto_week + hn_month + stackoverflow + reddit_programming + reddit_webdev + reddit_python + reddit_javascript + web_trends

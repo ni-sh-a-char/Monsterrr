@@ -206,8 +206,9 @@ async def main():
     
     # Start Discord bot
     try:
-        from services.discord_bot_runner import run_discord_bot
-        discord_task = asyncio.create_task(run_discord_bot())
+        # Fix the import - use the correct function from discord_bot_runner
+        from services.discord_bot_runner import run_bot_with_retry
+        discord_task = asyncio.create_task(asyncio.to_thread(run_bot_with_retry))
         tasks.append(discord_task)
         logger.info("✅ Discord bot started")
     except Exception as e:
@@ -251,5 +252,16 @@ async def main():
         logger.error(f"❌ Unexpected error: {e}")
         sys.exit(1)
 
+def run_server():
+    """Run the FastAPI server."""
+    import uvicorn
+    port = int(os.environ.get("PORT", "8000"))
+    logger.info(f"🚀 Starting web server on port {port}")
+    uvicorn.run("main:app", host="0.0.0.0", port=port, log_level="info")
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    # Check if we should run as a web server or as a worker
+    if len(sys.argv) > 1 and sys.argv[1] == "server":
+        run_server()
+    else:
+        asyncio.run(main())

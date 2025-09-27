@@ -5,6 +5,7 @@ GitHub API wrapper for Monsterrr.
 
 import os
 import time
+import threading
 from dotenv import load_dotenv
 load_dotenv()
 import httpx
@@ -12,16 +13,37 @@ import logging
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from typing import Optional, List, Dict, Any
 
+# Global rate limiting tracker
+_rate_limit_lock = threading.Lock()
+_last_request_time = 0
+_min_request_interval = 1.0  # Minimum time between requests in seconds
+
 class GitHubAPIError(Exception):
     """Custom exception for GitHub API errors."""
-    pass
+    def __init__(self, message: str, status_code: int = None, retry_after: int = None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.retry_after = retry_after
 
 class BaseService:
     """Base service for shared retry, logging, and error handling."""
     def __init__(self, logger: logging.Logger):
         self.logger = logger
 
+    def _rate_limit_delay(self):
+        """Ensure we don't make requests too quickly"""
+        global _last_request_time, _rate_limit_lock, _min_request_interval
+        with _rate_limit_lock:
+            current_time = time.time()
+            time_since_last_request = current_time - _last_request_time
+            if time_since_last_request < _min_request_interval:
+                sleep_time = _min_request_interval - time_since_last_request
+                time.sleep(sleep_time)
+            _last_request_time = time.time()
+
     def log_request(self, method: str, url: str, **kwargs):
+        # Apply rate limiting before each request
+        self._rate_limit_delay()
         if self.logger:
             self.logger.info(f"[GitHubService] {method} {url} | kwargs: { {k: v for k, v in kwargs.items() if k != 'headers'} }")
 
@@ -30,13 +52,21 @@ class BaseService:
             self.logger.info(f"[GitHubService] Response {resp.status_code} {resp.url}")
 
     def handle_error(self, resp: httpx.Response):
-        if resp.status_code == 403 and 'X-RateLimit-Remaining' in resp.headers and resp.headers['X-RateLimit-Remaining'] == '0':
-            reset = int(resp.headers.get('X-RateLimit-Reset', '0'))
-            raise GitHubAPIError(f"Rate limit exceeded. Retry after {reset}.")
+        if resp.status_code == 403 and 'X-RateLimit-Remaining' in resp.headers:
+            if resp.headers['X-RateLimit-Remaining'] == '0':
+                reset = int(resp.headers.get('X-RateLimit-Reset', '0'))
+                current_time = int(time.time())
+                wait_time = max(1, reset - current_time)
+                self.logger.warning(f"[GitHubService] Rate limit exceeded. Need to wait {wait_time} seconds.")
+                raise GitHubAPIError(
+                    f"Rate limit exceeded. Retry after {reset}.",
+                    status_code=403,
+                    retry_after=wait_time
+                )
         elif resp.status_code == 404:
-            raise GitHubAPIError(f"Resource not found: {resp.url}")
+            raise GitHubAPIError(f"Resource not found: {resp.url}", status_code=404)
         else:
-            raise GitHubAPIError(f"GitHub API error {resp.status_code}: {resp.text}")
+            raise GitHubAPIError(f"GitHub API error {resp.status_code}: {resp.text}", status_code=resp.status_code)
 
 class GitHubService(BaseService):
     def validate_credentials(self):
@@ -75,8 +105,14 @@ class GitHubService(BaseService):
             # Get organization info
             org_info = self.get_organization_info()
             
+            # Add delay before next request
+            time.sleep(1.5)  # Increased delay
+            
             # Get repositories
             repos = self.list_repositories()
+            
+            # Add delay before next request
+            time.sleep(1.5)  # Increased delay
             
             # Get members
             members_url = f"{self.BASE_URL}/orgs/{self.org}/members"
@@ -85,6 +121,9 @@ class GitHubService(BaseService):
                 members = members_resp.json()
             except:
                 members = []
+            
+            # Add delay before next request
+            time.sleep(1.5)  # Increased delay
             
             # Count public and private repos
             public_repos = [r for r in repos if not r.get('private', True)]
@@ -98,6 +137,9 @@ class GitHubService(BaseService):
                 public_members = public_members_resp.json()
             except:
                 public_members = []
+            
+            # Add delay before next request
+            time.sleep(1.5)  # Increased delay
             
             # Get organization teams
             try:
@@ -131,7 +173,7 @@ class GitHubService(BaseService):
                         "private": r.get("private", False),
                         "url": r.get("html_url", "")
                     }
-                    for r in repos
+                    for r in repos[:50]  # Limit to first 50 repos to reduce memory usage
                 ]
             }
         except Exception as e:
@@ -266,7 +308,7 @@ class GitHubService(BaseService):
             "Accept": "application/vnd.github+json"
         }
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), retry=retry_if_exception_type(httpx.RequestError))
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=30), retry=retry_if_exception_type((httpx.RequestError, GitHubAPIError)))
     def _request(self, method: str, url: str, **kwargs) -> httpx.Response:
         self.log_request(method, url, **kwargs)
         try:
@@ -274,22 +316,70 @@ class GitHubService(BaseService):
                 resp = client.request(method, url, headers=self.headers, **kwargs)
             self.log_response(resp)
             if resp.status_code >= 400:
+                # Check for rate limiting
+                if resp.status_code == 403 and 'X-RateLimit-Remaining' in resp.headers:
+                    if resp.headers['X-RateLimit-Remaining'] == '0':
+                        reset = int(resp.headers.get('X-RateLimit-Reset', '0'))
+                        current_time = int(time.time())
+                        wait_time = max(1, reset - current_time)
+                        self.logger.warning(f"[GitHubService] Rate limit exceeded. Need to wait {wait_time} seconds.")
+                        # For rate limiting, we want to wait and then retry
+                        if wait_time > 0:
+                            time.sleep(min(wait_time, 60))  # Cap at 60 seconds
+                        raise GitHubAPIError(
+                            f"Rate limit exceeded. Retry after {reset}.",
+                            status_code=403,
+                            retry_after=wait_time
+                        )
                 self.handle_error(resp)
             return resp
         except httpx.RequestError as e:
             self.logger.error(f"[GitHubService] Network error: {e}")
             raise
+        except GitHubAPIError as e:
+            # If it's a rate limit error, we might want to handle it specially
+            if e.status_code == 403 and e.retry_after:
+                self.logger.warning(f"[GitHubService] Rate limit error will be retried: {e}")
+            raise
+        except Exception as e:
+            self.logger.error(f"[GitHubService] Unexpected error: {e}")
+            raise GitHubAPIError(f"Unexpected error: {e}")
 
     def list_repositories(self) -> List[Dict[str, Any]]:
         """List all repositories in the organization (handles pagination)."""
         url = f"{self.BASE_URL}/orgs/{self.org}/repos"
         repos = []
-        params = {"per_page": 100, "type": "all"}
+        params = {"per_page": 30, "type": "all"}  # Further reduced per_page to 30
+        page = 1
+        
         while url:
-            resp = self._request("GET", url, params=params)
-            repos.extend(resp.json())
-            url = resp.links.get('next', {}).get('url')
-            params = None  # Only needed for first page
+            params["page"] = page
+            try:
+                resp = self._request("GET", url, params=params)
+                page_repos = resp.json()
+                if not page_repos:  # No more repositories
+                    break
+                repos.extend(page_repos)
+                
+                # Check if we have more pages
+                if len(page_repos) < params["per_page"]:
+                    break
+                    
+                page += 1
+                
+                # Add a delay between requests to prevent rate limiting
+                time.sleep(1.0)  # Increased delay to 1 second
+            except GitHubAPIError as e:
+                if e.status_code == 403 and e.retry_after:
+                    self.logger.warning(f"[GitHubService] Rate limit hit while listing repositories. Waiting {e.retry_after} seconds.")
+                    time.sleep(min(e.retry_after, 60))  # Wait for rate limit reset, capped at 60 seconds
+                    continue  # Retry the same page
+                else:
+                    raise
+            except Exception as e:
+                self.logger.error(f"[GitHubService] Error listing repositories: {e}")
+                break
+                
         return repos
 
     def get_repository(self, repo_name: str) -> Dict[str, Any]:
@@ -479,12 +569,42 @@ class GitHubService(BaseService):
         resp = self._request("GET", url)
         return resp.json()
 
-    def list_issues(self, repo: str, state: str = "open") -> List[Dict[str, Any]]:
-        """List issues in a repo."""
-        url = f"{self.BASE_URL}/repos/{self.org}/{repo}/issues"
-        params = {"state": state, "per_page": 100}
-        resp = self._request("GET", url, params=params)
-        return resp.json()
+    def list_issues(self, repo_name: str, state: str = "open") -> List[Dict[str, Any]]:
+        """List issues in a repository with rate limiting."""
+        url = f"{self.BASE_URL}/repos/{self.org}/{repo_name}/issues"
+        issues = []
+        params = {"state": state, "per_page": 30}  # Reduced per_page to 30
+        page = 1
+        
+        while url:
+            params["page"] = page
+            try:
+                resp = self._request("GET", url, params=params)
+                page_issues = resp.json()
+                if not page_issues:  # No more issues
+                    break
+                issues.extend(page_issues)
+                
+                # Check if we have more pages
+                if len(page_issues) < params["per_page"]:
+                    break
+                    
+                page += 1
+                
+                # Add a delay between requests to prevent rate limiting
+                time.sleep(1.0)  # Increased delay to 1 second
+            except GitHubAPIError as e:
+                if e.status_code == 403 and e.retry_after:
+                    self.logger.warning(f"[GitHubService] Rate limit hit while listing issues. Waiting {e.retry_after} seconds.")
+                    time.sleep(min(e.retry_after, 60))  # Wait for rate limit reset, capped at 60 seconds
+                    continue  # Retry the same page
+                else:
+                    raise
+            except Exception as e:
+                self.logger.error(f"[GitHubService] Error listing issues: {e}")
+                break
+                
+        return issues
 
     def close_issue(self, repo: str, issue_number: int) -> Dict[str, Any]:
         """Close an issue."""

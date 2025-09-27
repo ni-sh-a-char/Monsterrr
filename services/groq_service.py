@@ -106,7 +106,25 @@ class GroqService:
                 if resp.status_code == 429 or resp.status_code >= 500:
                     self.logger.error(f"Groq API {resp.status_code} error: {raw_body}. Retrying...")
                     attempt += 1
-                    time.sleep(2 ** attempt)
+                    # For rate limiting (429), wait longer based on the error message
+                    if resp.status_code == 429:
+                        try:
+                            import json
+                            error_data = resp.json()
+                            # Extract wait time from error message if available
+                            message = error_data.get("error", {}).get("message", "")
+                            # Look for patterns like "Please try again in 12m17.962s"
+                            import re
+                            wait_match = re.search(r"try again in ([\d\.]+)s", message)
+                            if wait_match:
+                                wait_time = float(wait_match.group(1))
+                                time.sleep(min(wait_time, 60))  # Cap at 60 seconds
+                            else:
+                                time.sleep(min(2 ** attempt, 30))  # Exponential backoff, max 30s
+                        except Exception:
+                            time.sleep(min(2 ** attempt, 30))  # Fallback to exponential backoff
+                    else:
+                        time.sleep(2 ** attempt)
                     continue
                 if resp.status_code < 200 or resp.status_code >= 300:
                     self.logger.error(f"Groq API unexpected status {resp.status_code}: {raw_body}")

@@ -1,0 +1,16 @@
+[
+  {
+    "type": "repo",
+    "name": "monsterrr-fallback-project-20250927-1629",
+    "description": "Fallback repository created due to planning error",
+    "details": {
+      "tech_stack": [
+        "Python"
+      ],
+      "roadmap": [
+        "Initialize project",
+        "Add structure"
+      ]
+    }
+  }
+]

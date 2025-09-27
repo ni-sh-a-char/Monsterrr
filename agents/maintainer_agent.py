@@ -100,12 +100,16 @@ IMPORTANT: Limit your response to exactly {num_contributions} contributions to p
             self.logger.info(f"[MaintainerAgent] Planning daily contributions with enhanced consciousness (level: {self.consciousness_level:.2f}).")
             plan = []
             try:
+                # Add rate limiting before Groq call
+                time.sleep(2)  # Wait 2 seconds between major Groq calls
                 response = self.groq_client.groq_llm(consciousness_prompt)
                 self.logger.info(f"[MaintainerAgent] Groq plan raw response: {response[:2000]}")
                 try:
                     plan = json.loads(response)
                 except Exception as e:
                     self.logger.error(f"[MaintainerAgent] Groq plan not valid JSON: {e}. Re-prompting.")
+                    # Add rate limiting before retry
+                    time.sleep(2)
                     retry_prompt = consciousness_prompt + "\n\nReturn ONLY a valid JSON list, no extra text. If you cannot, return a default plan with repository creation."
                     response2 = self.groq_client.groq_llm(retry_prompt)
                     try:
@@ -463,6 +467,8 @@ Track recent commits, issues, and PRs here.
             repo_info = self.github_service.get_repository(repo)
             description = repo_info.get("description", "")
             
+            # Add rate limiting before Groq call
+            time.sleep(2)  # Wait 2 seconds before Groq call
             # Generate updated documentation
             prompt = f"Generate updated documentation for a repository named '{repo}' with description: '{description}'. Include sections for installation, usage, API documentation, and examples."
             docs_content = self.groq_client.groq_llm(prompt)
@@ -491,6 +497,8 @@ Track recent commits, issues, and PRs here.
                 # Get file content
                 content = self.github_service.get_file_content(repo, file_path)
                 
+                # Add rate limiting before Groq call
+                time.sleep(3)  # Wait 3 seconds between Groq calls for code quality
                 # Analyze code quality
                 prompt = f"Analyze the following Python code for code quality issues, best practices, and potential improvements:\n\n{content[:2000]}"
                 analysis = self.groq_client.groq_llm(prompt)
@@ -526,6 +534,8 @@ Track recent commits, issues, and PRs here.
                 continue
             # Respond to issues with Groq suggestion
             try:
+                # Add rate limiting before Groq call
+                time.sleep(3)  # Wait 3 seconds between Groq calls for issues
                 prompt = f"Suggest a concise fix or next step for this GitHub issue: {title}\n\nIssue description: {issue.get('body', '')[:500]}"
                 suggestion = self.groq_client.groq_llm(prompt)
                 self.github_service.create_issue(
@@ -551,6 +561,8 @@ Track recent commits, issues, and PRs here.
             else:
                 # Review PR with AI
                 try:
+                    # Add rate limiting before Groq call
+                    time.sleep(3)  # Wait 3 seconds between Groq calls for PRs
                     pr_details = self.github_service.get_pull_request(repo, number)
                     prompt = f"Review this pull request and provide feedback:\n\nTitle: {pr_details.get('title', '')}\n\nDescription: {pr_details.get('body', '')[:500]}\n\nCode changes: [Code changes would be analyzed here]"
                     review = self.groq_client.groq_llm(prompt)
