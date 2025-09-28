@@ -403,40 +403,50 @@ def _call_groq(prompt: str, model: Optional[str] = None) -> str:
 # Startup message handler
 async def send_startup_message_once():
     """Send startup message once."""
-    startup_flag_path = "discord_startup_sent.json"
-    flag = False
+    state_path = "monsterrr_state.json"
+    flag_key = "discord_startup_message_sent"
     
     try:
-        if os.path.exists(startup_flag_path):
-            with open(startup_flag_path, "r", encoding="utf-8") as f:
-                flag = json.load(f).get("sent", False)
-    except Exception:
-        flag = False
-    
-    if flag:
-        logger.info("Startup message already sent, skipping.")
-        return
-    
-    await asyncio.sleep(2)
-    if CHANNEL_ID:
-        try:
-            ch = bot.get_channel(int(CHANNEL_ID))
-            if ch:
-                status_text = (
-                    f"**🤖 Monsterrr System Status**\n"
-                    f"Startup time: {STARTUP_TIME.strftime('%Y-%m-%d %H:%M:%S IST')}\n"
-                    f"Model: {GROQ_MODEL}\n\n"
-                    f"**Discord Stats:**\n• Guilds: {len(bot.guilds)}\n• Members: {sum(g.member_count for g in bot.guilds)}\n"
-                )
-                await ch.send(embed=create_professional_embed("Monsterrr is online!", status_text, 0x00ff00))
-                
+        # Load current state
+        state = {}
+        if os.path.exists(state_path):
+            with open(state_path, "r", encoding="utf-8") as f:
                 try:
-                    with open(startup_flag_path, "w", encoding="utf-8") as f:
-                        json.dump({"sent": True}, f, indent=2)
+                    state = json.load(f)
                 except Exception:
-                    logger.error("Failed to update discord_startup_sent.json")
-        except Exception:
-            logger.exception("startup message failed")
+                    state = {}
+        
+        # Check if startup message has already been sent
+        if state.get(flag_key, False):
+            logger.info("Discord startup message already sent, skipping.")
+            return
+    
+        await asyncio.sleep(2)
+        if CHANNEL_ID:
+            try:
+                ch = bot.get_channel(int(CHANNEL_ID))
+                if ch:
+                    status_text = (
+                        f"**🤖 Monsterrr System Status**\n"
+                        f"Startup time: {STARTUP_TIME.strftime('%Y-%m-%d %H:%M:%S IST')}\n"
+                        f"Model: {GROQ_MODEL}\n\n"
+                        f"**Discord Stats:**\n• Guilds: {len(bot.guilds)}\n• Members: {sum(g.member_count for g in bot.guilds)}\n"
+                    )
+                    await ch.send(embed=create_professional_embed("Monsterrr is online!", status_text, 0x00ff00))
+                    
+                    # Update state to mark startup message as sent
+                    try:
+                        state[flag_key] = True
+                        state["discord_startup_time"] = datetime.now(IST).isoformat()
+                        with open(state_path, "w", encoding="utf-8") as f:
+                            json.dump(state, f, indent=2)
+                        logger.info("Discord startup message sent and state updated.")
+                    except Exception:
+                        logger.error("Failed to update state file after sending Discord startup message")
+            except Exception:
+                logger.exception("Discord startup message failed")
+    except Exception as e:
+        logger.error(f"Error in send_startup_message_once: {e}")
 
 # Report generators
 def build_daily_report():
@@ -639,35 +649,72 @@ async def send_hourly_status_report():
             logger.error(f"Hourly report: Failed to send: {e}")
 
 async def send_daily_email_report():
-    """Send daily email reports."""
+    """Send daily email reports only once."""
+    # Check state to see if daily report has already been sent today
+    state_path = "monsterrr_state.json"
+    flag_key = "daily_email_report_sent"
+    date_key = "daily_email_report_date"
+    
     while True:
-        await asyncio.sleep(86400)  # 24 hours
         try:
-            subject, html = build_daily_report()
-            recipients = os.getenv("STATUS_REPORT_RECIPIENTS", "").split(",")
-            smtp_host = os.getenv("SMTP_HOST")
-            smtp_port = int(os.getenv("SMTP_PORT", "587"))
-            smtp_user = os.getenv("SMTP_USER")
-            smtp_pass = os.getenv("SMTP_PASS")
+            # Load current state
+            state = {}
+            if os.path.exists(state_path):
+                with open(state_path, "r", encoding="utf-8") as f:
+                    try:
+                        state = json.load(f)
+                    except Exception:
+                        state = {}
             
-            if not recipients or not smtp_host or not smtp_user or not smtp_pass:
-                logger.error("Daily email report: Missing SMTP or recipient config.")
-                continue
+            # Check if daily report has already been sent today
+            today = datetime.now(IST).strftime('%Y-%m-%d')
+            last_sent_date = state.get(date_key, "")
             
-            msg = MIMEMultipart("alternative")
-            msg["Subject"] = subject
-            msg["From"] = smtp_user
-            msg["To"] = ", ".join(recipients)
-            msg.attach(MIMEText(html, "html"))
+            if last_sent_date == today:
+                logger.info(f"Daily email report already sent today ({today}), skipping.")
+            else:
+                # Send the daily report
+                subject, html = build_daily_report()
+                recipients = os.getenv("STATUS_REPORT_RECIPIENTS", "").split(",")
+                smtp_host = os.getenv("SMTP_HOST")
+                smtp_port = int(os.getenv("SMTP_PORT", "587"))
+                smtp_user = os.getenv("SMTP_USER")
+                smtp_pass = os.getenv("SMTP_PASS")
+                
+                if not recipients or not smtp_host or not smtp_user or not smtp_pass:
+                    logger.error("Daily email report: Missing SMTP or recipient config.")
+                else:
+                    msg = MIMEMultipart("alternative")
+                    msg["Subject"] = subject
+                    msg["From"] = smtp_user
+                    msg["To"] = ", ".join(recipients)
+                    msg.attach(MIMEText(html, "html"))
+                    
+                    try:
+                        with smtplib.SMTP(smtp_host, smtp_port) as server:
+                            server.starttls()
+                            server.login(smtp_user, smtp_pass)
+                            server.sendmail(smtp_user, recipients, msg.as_string())
+                        
+                        logger.info(f"Daily email report sent to: {recipients}")
+                        
+                        # Update state to mark daily report as sent today
+                        try:
+                            state[flag_key] = True
+                            state[date_key] = today
+                            with open(state_path, "w", encoding="utf-8") as f:
+                                json.dump(state, f, indent=2)
+                            logger.info(f"Daily email report state updated for {today}.")
+                        except Exception:
+                            logger.error("Failed to update state file after sending daily email report")
+                    except Exception as e:
+                        logger.error(f"Daily report: Failed to send: {e}")
             
-            with smtplib.SMTP(smtp_host, smtp_port) as server:
-                server.starttls()
-                server.login(smtp_user, smtp_pass)
-                server.sendmail(smtp_user, recipients, msg.as_string())
-            
-            logger.info(f"Daily email report sent to: {recipients}")
+            # Wait for 24 hours before checking again
+            await asyncio.sleep(86400)  # 24 hours
         except Exception as e:
-            logger.error(f"Daily report: Failed to send: {e}")
+            logger.error(f"Error in send_daily_email_report: {e}")
+            await asyncio.sleep(3600)  # Wait 1 hour before retrying on error
 
 # Enhanced command handler for natural language with consciousness
 async def handle_natural_command(intent, content, user_id):

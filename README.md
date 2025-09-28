@@ -80,6 +80,78 @@ The `all` mode is recommended for Docker deployments as it provides the cleanest
 
 ---
 
+## 🧠 Advanced Groq Model Management
+
+Monsterrr now supports intelligent model selection for different tasks with automatic fallback for rate limiting:
+
+### Task-Specific Models
+- **Complex Tasks**: `openai/gpt-oss-120b` and `llama-3.3-70b-versatile`
+- **Balanced Tasks**: `llama-3.1-8b-instant` and `openai/gpt-oss-20b`
+- **Fast Tasks**: `llama-3.1-8b-instant` (optimized for speed)
+
+### Rate Limit Handling
+- Automatic fallback to alternative models when rate limits are hit
+- Intelligent wait time calculation based on API response headers
+- Exponential backoff for server errors
+- Comprehensive error logging and recovery
+
+### Available Models
+1. `openai/gpt-oss-120b` - Flagship model for complex reasoning
+2. `llama-3.3-70b-versatile` - High-performance alternative
+3. `llama-3.1-8b-instant` - Fast and efficient for general tasks
+4. `openai/gpt-oss-20b` - Good balance of speed and capability
+
+---
+
+## 📧 Enhanced Email Reporting
+
+Monsterrr now features improved email reporting with:
+
+### Professional Reports
+- Beautiful HTML-formatted status reports
+- Plain text fallback for compatibility
+- Comprehensive activity summaries
+- Recent actions and idea tracking
+
+### Reliable Delivery
+- Enhanced SMTP connectivity checking
+- Better error handling and logging
+- Automatic report sending on startup and daily
+- Configuration validation at startup
+
+### Report Content
+- Repository statistics and organization metrics
+- Recently executed actions and contributions
+- Top generated ideas with technical details
+- System health and performance indicators
+
+### One-Time Messaging
+- **Startup Messages**: Discord startup messages and emails are sent only once
+- **Daily Reports**: Email reports are sent only once per day
+- **State Tracking**: All message states are tracked in `monsterrr_state.json`
+- **Persistent State**: Message history is preserved across restarts
+
+---
+
+## 📡 Discord Integration
+
+Monsterrr's Discord bot provides real-time communication and control:
+
+### Smart Messaging
+- **One-Time Startup**: Discord startup messages are sent only once per system start
+- **Daily Reports**: Daily status reports sent automatically once per day
+- **Activity Tracking**: Real-time updates on system activities and contributions
+- **Command Interface**: Full control through natural language commands
+
+### Features
+- All Monsterrr features accessible via Discord commands
+- Web search from Discord with `!search <query or url>`
+- Natural language support for conversational interactions
+- Professional responses using rich Discord embeds
+- Real-time alerts, polls, and executive reports
+
+---
+
 Monsterrr is a multi-agent, production-ready system that discovers, creates, and maintains open-source projects for your GitHub organization. Powered by Groq LLM, Monsterrr automates daily planning, contribution execution, and professional reporting—keeping your org healthy and growing 24/7.
 
 ---

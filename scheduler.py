@@ -1,35 +1,14 @@
-# Background monitoring tasks
-import asyncio
-from datetime import datetime
-from services.github_service import GitHubService
-from utils.logger import setup_logger
-github = GitHubService(logger=setup_logger())
-
-async def monitor_org_health():
-    while True:
-        # Check for stale issues
-        stale_issues = github.find_stale_issues()
-        for issue in stale_issues:
-            github.close_issue(issue['repo'], issue['number'])
-            github.comment_on_issue(issue['repo'], issue['number'], "Closed due to inactivity.")
-        # Check for safe PRs to auto-merge
-        safe_prs = github.find_safe_prs()
-        for pr in safe_prs:
-            github.merge_pr(pr['repo'], pr['number'])
-            github.comment_on_pr(pr['repo'], pr['number'], "Auto-merged by Monsterrr.")
-        # Check for repo activity and security
-        github.audit_repos()
-        await asyncio.sleep(3600)  # Run every hour
-
-def start_background_monitoring():
-    loop = asyncio.get_event_loop()
-    loop.create_task(monitor_org_health())
 """
-Production scheduler for Monsterrr: daily jobs, status report email, robust logging, and one-time startup email.
+Scheduler for Monsterrr's daily operations.
 """
 
 import asyncio
+import os
+import json
+import traceback
+from datetime import datetime, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
 from utils.config import Settings
 from utils.logger import setup_logger
 import traceback
@@ -70,89 +49,43 @@ def daily_job():
     logger.info("[Scheduler] Running enhanced daily job: MaintainerAgent plans and executes 3 contributions + status report.")
     
     try:
-        # Ensure we have the latest organization stats
-        try:
-            org_stats = github.get_organization_stats()
-            logger.info(f"[Scheduler] Organization stats: {org_stats.get('total_repos', 0)} repos, {org_stats.get('members', 0)} members")
-            
-            # Update state with organization stats
-            state_path = "monsterrr_state.json"
-            state = {}
-            if os.path.exists(state_path):
-                with open(state_path, "r", encoding="utf-8") as f:
-                    try:
-                        state = json.load(f)
-                    except Exception:
-                        state = {}
-            
-            state["organization_stats"] = org_stats
-            with open(state_path, "w", encoding="utf-8") as f:
-                json.dump(state, f, indent=2)
-        except Exception as e:
-            logger.error(f"[Scheduler] Error getting organization stats: {e}")
+        # Generate new ideas
+        logger.info("[Scheduler] Generating new ideas...")
+        ideas = idea_agent.generate_ideas(count=5)
+        logger.info(f"[Scheduler] Generated {len(ideas)} ideas.")
         
-        # Plan 3 contributions and execute them (not dry-run)
+        # Plan daily contributions
         logger.info("[Scheduler] Planning daily contributions...")
-        plan = maintainer_agent.plan_daily_contributions(num_contributions=3)
+        plan = maintainer_agent.plan_daily_contributions(ideas)
+        logger.info(f"[Scheduler] Planned {len(plan)} contributions.")
         
-        if plan:
-            logger.info(f"[Scheduler] Executing {len(plan)} planned contributions...")
-            maintainer_agent.execute_daily_plan(plan, creator_agent=creator_agent, dry_run=False)
-            
-            # Log successful execution
-            state_path = "monsterrr_state.json"
-            if os.path.exists(state_path):
-                with open(state_path, "r", encoding="utf-8") as f:
-                    try:
-                        state = json.load(f)
-                    except Exception:
-                        state = {}
-                
-                actions = state.get("actions", [])
-                actions.append({
-                    "timestamp": datetime.utcnow().isoformat(),
-                    "type": "daily_plan_executed",
-                    "details": {
-                        "contributions_count": len(plan),
-                        "plan": plan
-                    }
-                })
-                state["actions"] = actions
-                
-                with open(state_path, "w", encoding="utf-8") as f:
-                    json.dump(state, f, indent=2)
-        else:
-            logger.warning("[Scheduler] No contributions planned. Creating a default repository...")
-            # If no plan was generated, create a default repository
-            default_idea = {
-                "name": f"monsterrr-project-{datetime.utcnow().strftime('%Y%m%d-%H%M')}",
-                "description": "Auto-generated project by Monsterrr autonomous agent",
-                "tech_stack": ["Python", "FastAPI"],
-                "roadmap": ["Initialize project structure", "Add basic API endpoints", "Implement tests"]
-            }
-            creator_agent.create_or_improve_repository(default_idea)
-            
-            # Log this action
-            state_path = "monsterrr_state.json"
-            if os.path.exists(state_path):
-                with open(state_path, "r", encoding="utf-8") as f:
-                    try:
-                        state = json.load(f)
-                    except Exception:
-                        state = {}
-                
-                actions = state.get("actions", [])
-                actions.append({
-                    "timestamp": datetime.utcnow().isoformat(),
-                    "type": "default_repo_created",
-                    "details": {
-                        "repo_name": default_idea["name"]
-                    }
-                })
-                state["actions"] = actions
-                
-                with open(state_path, "w", encoding="utf-8") as f:
-                    json.dump(state, f, indent=2)
+        # Execute the plan
+        logger.info("[Scheduler] Executing daily plan...")
+        results = maintainer_agent.execute_plan(plan)
+        logger.info(f"[Scheduler] Executed {len(results)} contributions.")
+        
+        # Update state file with actions
+        state_path = "monsterrr_state.json"
+        state = {}
+        if os.path.exists(state_path):
+            with open(state_path, "r", encoding="utf-8") as f:
+                try:
+                    state = json.load(f)
+                except Exception:
+                    state = {}
+        
+        # Add actions to state
+        actions = state.get("actions", [])
+        for result in results:
+            actions.append({
+                "timestamp": datetime.utcnow().isoformat(),
+                "type": "contribution_executed",
+                "details": result
+            })
+        state["actions"] = actions
+        
+        with open(state_path, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
         
         # Perform maintenance tasks
         logger.info("[Scheduler] Performing maintenance tasks...")
@@ -165,19 +98,14 @@ def daily_job():
         logger.error(f"[Scheduler] Error in daily job: {e}\n{traceback.format_exc()}")
 
 def send_status_report():
-    logger.info("[Scheduler] Sending daily status report.")
+    """Send daily status report only once per day."""
+    logger.info("[Scheduler] Checking if daily status report should be sent.")
     try:
-        # Generate comprehensive report
-        report = reporting_service.generate_comprehensive_report()
-        
-        # Send email report if configured
-        if settings.SMTP_HOST and settings.SMTP_USER and settings.SMTP_PASS and settings.STATUS_REPORT_RECIPIENTS:
-            recipients = settings.recipients
-            reporting_service.send_email_report(recipients, report)
-            logger.info("[Scheduler] Email status report sent.")
-        
-        # Update state file with report data
         state_path = "monsterrr_state.json"
+        flag_key = "scheduler_daily_report_sent"
+        date_key = "scheduler_daily_report_date"
+        
+        # Load current state
         state = {}
         if os.path.exists(state_path):
             with open(state_path, "r", encoding="utf-8") as f:
@@ -186,7 +114,53 @@ def send_status_report():
                 except Exception:
                     state = {}
         
+        # Check if daily report has already been sent today
+        from datetime import datetime
+        today = datetime.utcnow().strftime('%Y-%m-%d')
+        last_sent_date = state.get(date_key, "")
+        
+        if last_sent_date == today:
+            logger.info(f"[Scheduler] Daily status report already sent today ({today}), skipping.")
+            return
+        
+        # Generate comprehensive report
+        report = reporting_service.generate_comprehensive_report()
+        
+        # Send email report if configured
+        if settings.SMTP_HOST and settings.SMTP_USER and settings.SMTP_PASS and settings.STATUS_REPORT_RECIPIENTS:
+            recipients = settings.recipients
+            success = reporting_service.send_email_report(recipients, report)
+            if success:
+                logger.info("[Scheduler] Email status report sent successfully.")
+                
+                # Update state to mark daily report as sent today
+                try:
+                    state[flag_key] = True
+                    state[date_key] = today
+                    with open(state_path, "w", encoding="utf-8") as f:
+                        json.dump(state, f, indent=2)
+                    logger.info(f"[Scheduler] Daily status report state updated for {today}.")
+                except Exception as e:
+                    logger.error(f"[Scheduler] Failed to update state file after sending daily report: {e}")
+            else:
+                logger.error("[Scheduler] Failed to send email status report.")
+        else:
+            logger.warning("[Scheduler] Email configuration incomplete. Skipping email report.")
+            # Log what's missing
+            missing = []
+            if not settings.SMTP_HOST:
+                missing.append("SMTP_HOST")
+            if not settings.SMTP_USER:
+                missing.append("SMTP_USER")
+            if not settings.SMTP_PASS:
+                missing.append("SMTP_PASS")
+            if not settings.STATUS_REPORT_RECIPIENTS:
+                missing.append("STATUS_REPORT_RECIPIENTS")
+            logger.info(f"[Scheduler] Missing configuration: {', '.join(missing)}")
+        
+        # Update state file with report data
         state["last_report"] = report
+        state["last_report_time"] = datetime.utcnow().isoformat()
         with open(state_path, "w", encoding="utf-8") as f:
             json.dump(state, f, indent=2)
             
@@ -276,6 +250,10 @@ This is a one-time launch notification from Monsterrr.
 
 def smtp_connectivity_check():
     """Check SMTP credentials at startup and log result."""
+    if not settings.SMTP_HOST or not settings.SMTP_USER or not settings.SMTP_PASS:
+        logger.warning("[Startup] SMTP configuration incomplete. Email reports will be disabled.")
+        return
+        
     try:
         with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
             server.starttls()
@@ -341,6 +319,10 @@ async def start_scheduler():
         startup_time = state.get("initial_startup_time", "Unknown")
         logger.info(f"[Scheduler] Startup email already sent. Initial startup time: {startup_time}")
     
+    # Send a daily report immediately to verify email functionality (but only if not already sent today)
+    logger.info("[Scheduler] Checking if initial status report should be sent to verify email functionality.")
+    send_status_report()
+    
     # Keep the scheduler running indefinitely
     try:
         while True:
@@ -349,117 +331,11 @@ async def start_scheduler():
         pass
 
 def quick_check():
-    """Quick check to ensure Monsterrr is active and performing work."""
-    logger.info("[Scheduler] Quick check - ensuring Monsterrr activity")
-    
+    """Quick check to ensure the system is still running."""
+    logger.info("[Scheduler] Quick system health check.")
     try:
-        # Check if we have any repositories
-        repos = github.list_repositories()
-        logger.info(f"[Scheduler] Quick check found {len(repos)} repositories")
-        
-        # If no repositories, create one
-        if len(repos) == 0:
-            logger.info("[Scheduler] No repositories found. Creating initial repository...")
-            default_idea = {
-                "name": f"monsterrr-starter-{datetime.utcnow().strftime('%Y%m%d-%H%M')}",
-                "description": "Starter repository created by Monsterrr",
-                "tech_stack": ["Python"],
-                "roadmap": ["Initialize project", "Add basic structure"]
-            }
-            creator_agent.create_or_improve_repository(default_idea)
-            
-            # Log this action
-            state_path = "monsterrr_state.json"
-            if os.path.exists(state_path):
-                with open(state_path, "r", encoding="utf-8") as f:
-                    try:
-                        state = json.load(f)
-                    except Exception:
-                        state = {}
-                
-                actions = state.get("actions", [])
-                actions.append({
-                    "timestamp": datetime.utcnow().isoformat(),
-                    "type": "starter_repo_created",
-                    "details": {
-                        "repo_name": default_idea["name"]
-                    }
-                })
-                state["actions"] = actions
-                
-                with open(state_path, "w", encoding="utf-8") as f:
-                    json.dump(state, f, indent=2)
-        else:
-            # Perform maintenance on existing repositories
-            logger.info("[Scheduler] Performing maintenance on existing repositories...")
-            maintainer_agent.perform_maintenance()
-            
-            # Enhance Monsterrr's own code
-            logger.info("[Scheduler] Enhancing Monsterrr's own code...")
-            self_enhance_monsterrr()
-                    
+        # Simple health check - try to get organization stats
+        org_stats = github.get_organization_stats()
+        logger.info(f"[Scheduler] Quick check successful. Organization has {org_stats.get('members', 0)} members.")
     except Exception as e:
-        logger.error(f"[Scheduler] Error in quick check: {e}")
-
-def self_enhance_monsterrr():
-    """Enhance Monsterrr's own code by analyzing its performance and making improvements."""
-    try:
-        logger.info("[Scheduler] Starting self-enhancement process...")
-        
-        # Load current state
-        state_path = "monsterrr_state.json"
-        if os.path.exists(state_path):
-            with open(state_path, "r", encoding="utf-8") as f:
-                try:
-                    state = json.load(f)
-                except Exception:
-                    state = {}
-        else:
-            state = {}
-        
-        # Analyze performance metrics
-        actions = state.get("actions", [])
-        repos = state.get("repos", [])
-        ideas = state.get("ideas", {}).get("top_ideas", [])
-        
-        # Generate improvement suggestions
-        improvement_prompt = f"""
-        Analyze the following Monsterrr performance data and suggest code improvements:
-        
-        Actions performed: {len(actions)}
-        Repositories managed: {len(repos)}
-        Ideas generated: {len(ideas)}
-        
-        Based on this data, suggest specific improvements to Monsterrr's codebase that would:
-        1. Increase efficiency
-        2. Improve reliability
-        3. Enhance capabilities
-        4. Reduce errors
-        
-        Provide concrete code changes or architectural improvements.
-        """
-        
-        # For now, we'll just log that self-enhancement was attempted
-        # In a more advanced implementation, this would actually make code changes
-        logger.info("[Scheduler] Self-enhancement analysis completed")
-        
-        # Log this enhancement attempt
-        actions.append({
-            "timestamp": datetime.utcnow().isoformat(),
-            "type": "self_enhancement_attempted",
-            "details": {
-                "actions_count": len(actions),
-                "repos_count": len(repos),
-                "ideas_count": len(ideas)
-            }
-        })
-        state["actions"] = actions
-        
-        with open(state_path, "w", encoding="utf-8") as f:
-            json.dump(state, f, indent=2)
-            
-    except Exception as e:
-        logger.error(f"[Scheduler] Error in self-enhancement: {e}")
-
-if __name__ == "__main__":
-    asyncio.run(start_scheduler())
+        logger.error(f"[Scheduler] Quick check failed: {e}")
