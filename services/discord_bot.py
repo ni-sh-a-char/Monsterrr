@@ -511,91 +511,6 @@ def build_daily_report():
     return subject, html
 
 # Background tasks
-async def send_hourly_status_report():
-    """Send hourly status reports."""
-    while True:
-        await asyncio.sleep(3600)  # 1 hour
-        try:
-            if CHANNEL_ID:
-                ch = bot.get_channel(int(CHANNEL_ID))
-                if ch:
-                    try:
-                        with open("monsterrr_state.json", "r", encoding="utf-8") as f:
-                            state = json.load(f)
-                    except Exception:
-                        state = {}
-                    
-                    now_ist = datetime.now(IST)
-                    uptime = str(now_ist - STARTUP_TIME).split(".")[0]
-                    
-                    try:
-                        cpu = psutil.cpu_percent(interval=0.1)
-                        mem = psutil.virtual_memory()
-                        mem_usage = f"{mem.percent:.1f}% (≈ {mem.used // (1024**2)} MB of {mem.total // (1024**2)} MB allocated)"
-                    except Exception:
-                        cpu = "N/A"
-                        mem_usage = "N/A"
-                    
-                    try:
-                        hostname = socket.gethostname()
-                        ip = socket.gethostbyname(hostname)
-                    except Exception:
-                        hostname = "Unknown"
-                        ip = "Unknown"
-                    
-                    github_org = os.getenv("GITHUB_ORG", "unknown")
-                    pr_count = state.get("pull_requests", {}).get("count", 0)
-                    pr_age = state.get("pull_requests", {}).get("avg_age_days", "N/A")
-                    issue_count = state.get("issues", {}).get("count", 0)
-                    issue_crit = state.get("issues", {}).get("critical", 0)
-                    issue_high = state.get("issues", {}).get("high", 0)
-                    issue_med = state.get("issues", {}).get("medium", 0)
-                    issue_low = state.get("issues", {}).get("low", 0)
-                    ci_status = state.get("ci", {}).get("status", "N/A")
-                    ci_duration = state.get("ci", {}).get("avg_duration", "N/A")
-                    sec_crit = state.get("security", {}).get("critical_alerts", 0)
-                    sec_warn = state.get("security", {}).get("warnings", 0)
-                    
-                    bots = state.get("automation_bots", {})
-                    bots_status = [f"• {bot_name} – {bot_info}" for bot_name, bot_info in bots.items()]
-                    
-                    queue = state.get("queue", [])
-                    queue_lines = [f"• {task}" for task in queue] if queue else ["• No active tasks in the queue."]
-                    
-                    next_actions = state.get("next_actions", [
-                        "Deploy any of the ideas you liked from the previous list.",
-                        "Provide a deeper dive into any metric (CPU spikes, memory trends, PR throughput).",
-                        "Execute a specific automation (run the dependency scanner now, create a new repo, etc.)."
-                    ])
-                    
-                    analytics = state.get("analytics", {})
-                    tasks = state.get("tasks", {})
-                    ideas = state.get("ideas", {}).get("top_ideas", [])
-                    
-                    recent_msgs = []
-                    try:
-                        recent_users = list(unique_users)[-3:] if unique_users else []
-                        for uid in recent_users:
-                            if uid in conversation_memory:
-                                recent_msgs.extend([m["content"] for m in conversation_memory[uid] if m.get("role") == "user"])
-                        recent_msgs = recent_msgs[-3:] if recent_msgs else []
-                    except Exception:
-                        recent_msgs = []
-                    
-                    status_lines = [
-                        f"**Current operational snapshot**",
-                        f"- Uptime: {uptime} (started at {STARTUP_TIME.strftime('%Y-%m-%d %H:%M:%S IST')})",
-                        f"- CPU load: {cpu} %",
-                        f"- Memory usage: {mem_usage}",
-                        f"- Hostname / IP: {hostname}",
-                        f"- Model in use: {GROQ_MODEL}",
-                        f"- Managing GitHub organization: {github_org}",
-                        f"- Org-wide health indicators:",
-                        f"    • Repository count: {len(state.get('repos', []))} active repos under the organization '{github_org}'",
-                        f"    • Pending pull-requests: {pr_count} (average age {pr_age} days)",
-                        f"    • Open issues: {issue_count} (critical {issue_crit}, high {issue_high}, medium {issue_med}, low {issue_low})",
-                        f"    • CI pipeline health: {ci_status}; average duration {ci_duration}",
-                        f"    • Security alerts: {sec_crit} critical, {sec_warn} warnings pending triage",
 @bot.event
 async def on_ready():
     """Bot is ready and connected."""
@@ -613,12 +528,12 @@ async def on_ready():
         
     if not state.get('discord_startup_sent'):
         # Send startup message to the specified channel
-        channel = bot.get_channel(int(settings.DISCORD_CHANNEL_ID))
+        channel = bot.get_channel(int(CHANNEL_ID))
         if channel:
             try:
                 embed = discord.Embed(
                     title="🚀 Monsterrr is Now Live!",
-                    description=f"GitHub Organization: **{settings.GITHUB_ORG}**\n\n"
+                    description=f"GitHub Organization: **{os.getenv('GITHUB_ORG', 'unknown')}**\n\n"
                                f"Monsterrr is now running and will keep your organization healthy and growing, 24/7.",
                     color=0x2d7ff9
                 )
@@ -646,98 +561,11 @@ async def on_ready():
     email_thread = threading.Thread(target=send_daily_email_report, daemon=True)
     email_thread.start()
 
-def send_hourly_status_report():
-    """Send hourly status report to Discord with better error handling."""
-    try:
-        # Import settings here to avoid circular imports
-        from utils.config import Settings
-        settings = Settings()
-        
-        # Only send if it's the primary guild
-        # Note: guild might not be available in this context, so we'll skip this check
-        # Get guild ID from settings instead
-        guild_id = settings.DISCORD_GUILD_ID
-        
-        # Get channel ID from settings
-        channel_id = settings.DISCORD_CHANNEL_ID
-        
-        if channel_id:
-            ch = bot.get_channel(int(channel_id))
-            if ch:
-                # Get status lines
-                bots_status = get_bots_status()
-                queue_lines = get_queue_lines()
-                analytics = get_analytics()
-                tasks = get_tasks()
-                ideas = get_top_ideas()
-                recent_msgs = get_recent_msgs()
-                next_actions = get_next_actions()
-                
-                if bots_status is not None and queue_lines is not None:
-                    now_ist = datetime.now(IST)
-                    status_lines = [
-                        f"```
-                        f"- Automation bots:",
-                    ]
-                    
-                    if bots_status:
-                        status_lines.extend(bots_status)
-                    else:
-                        status_lines.append("    • No automation bots configured.")
-                    
-                    status_lines.append("- Current tasks in the queue:")
-                    status_lines.extend(queue_lines)
-                    
-                    if analytics:
-                        status_lines.append("- Analytics:")
-                        for k, v in analytics.items():
-                            status_lines.append(f"    • {k}: {v}")
-                    
-                    if tasks:
-                        status_lines.append("- Tasks:")
-                        for user, tlist in tasks.items():
-                            status_lines.append(f"    • {user}: {', '.join(tlist)}")
-                    
-                    if ideas:
-                        status_lines.append("- Top Ideas:")
-                        for i in ideas:
-                            status_lines.append(f"    • {i.get('name','')}: {i.get('description','')}")
-                    
-                    status_lines.append("- Recent user activity:")
-                    if recent_msgs:
-                        for msg in recent_msgs:
-                            status_lines.append(f"    • {msg}")
-                    else:
-                        status_lines.append("    • No recent user activity.")
-                    
-                    status_lines.append("- What I can do next:")
-                    for action in next_actions:
-                        status_lines.append(f"    • {action}")
-                    
-                    embed = discord.Embed(
-                        title="🤖 Monsterrr Hourly Status",
-                        description="\n".join(status_lines),
-                        color=discord.Color.blue()
-                    )
-                    embed.set_footer(text=f"Monsterrr • {now_ist.strftime('%Y-%m-%d %H:%M IST')}")
-                    await ch.send(embed=embed)
-                    logger.info("Hourly status report sent to Discord.")
-                else:
-                    logger.error(f"Hourly report: Channel ID {CHANNEL_ID} not found.")
-            else:
-                logger.error("Hourly report: DISCORD_CHANNEL_ID not set.")
-        except Exception as e:
-            logger.error(f"Hourly report: Failed to send: {e}")
-
 def send_daily_email_report():
     """Send daily status report email with better error handling."""
     try:
-        # Import settings here to avoid circular imports
-        from utils.config import Settings
-        settings = Settings()
-        
         # Check if SMTP is configured
-        if not settings.SMTP_HOST or not settings.SMTP_USER or not settings.SMTP_PASS:
+        if not os.getenv("SMTP_HOST") or not os.getenv("SMTP_USER") or not os.getenv("SMTP_PASS"):
             logger.info("SMTP not configured, skipping daily email report.")
             return
             
@@ -766,10 +594,10 @@ def send_daily_email_report():
             from services.reporting_service import ReportingService
             
             reporting_service = ReportingService(
-                smtp_host=settings.SMTP_HOST,
-                smtp_port=settings.SMTP_PORT,
-                smtp_user=settings.SMTP_USER,
-                smtp_pass=settings.SMTP_PASS,
+                smtp_host=os.getenv("SMTP_HOST"),
+                smtp_port=int(os.getenv("SMTP_PORT", 587)),
+                smtp_user=os.getenv("SMTP_USER"),
+                smtp_pass=os.getenv("SMTP_PASS"),
                 logger=logger
             )
             
@@ -777,7 +605,10 @@ def send_daily_email_report():
             report = reporting_service.generate_comprehensive_report()
             
             # Send email with better error handling
-            if settings.recipients:
+            recipients = os.getenv("EMAIL_RECIPIENTS", "").split(",")
+            recipients = [r.strip() for r in recipients if r.strip()]
+            
+            if recipients:
                 # Run email sending in a separate thread with timeout
                 import threading
                 import time
@@ -786,7 +617,7 @@ def send_daily_email_report():
                 
                 def send_email_wrapper():
                     try:
-                        result["success"] = reporting_service.send_email_report(settings.recipients, report)
+                        result["success"] = reporting_service.send_email_report(recipients, report)
                     except Exception as e:
                         result["error"] = e
                         
