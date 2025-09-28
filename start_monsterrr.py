@@ -59,6 +59,7 @@ def run_hybrid():
         import uvicorn
         import threading
         import asyncio
+        import time
         
         # Setup memory management
         setup_memory_management()
@@ -106,20 +107,23 @@ def run_hybrid():
                 
                 discord_thread = threading.Thread(target=run_discord_safe, daemon=True)
                 discord_thread.start()
-                logger.info("✅ Discord bot started in background")
+                logger.info("✅ Discord bot started in background with isolated event loop")
                 
                 # Import and start autonomous orchestrator
                 try:
                     import autonomous_orchestrator
                     def run_orchestrator_safe():
                         try:
-                            asyncio.run(autonomous_orchestrator.daily_orchestration())
+                            # Create a new event loop for the orchestrator
+                            loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(loop)
+                            loop.run_until_complete(autonomous_orchestrator.daily_orchestration())
                         except Exception as e:
                             logger.error(f"❌ Orchestrator error: {e}")
                     
                     orchestrator_thread = threading.Thread(target=run_orchestrator_safe, daemon=True)
                     orchestrator_thread.start()
-                    logger.info("✅ Autonomous orchestrator started in background")
+                    logger.info("✅ Autonomous orchestrator started in background with isolated event loop")
                 except Exception as e:
                     logger.error(f"❌ Failed to start orchestrator: {e}")
                 
@@ -130,8 +134,7 @@ def run_hybrid():
         start_background_services()
         
         # Give background services a moment to start
-        import time
-        time.sleep(2)
+        time.sleep(3)
         
         # Start web server in main thread
         port = int(os.environ.get("PORT", "8000"))
@@ -147,6 +150,8 @@ def run_hybrid():
         
     except Exception as e:
         logger.error(f"❌ Failed to start hybrid mode: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         sys.exit(1)
 
 def run_all_background():

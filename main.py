@@ -260,16 +260,22 @@ async def main():
         import threading
         discord_thread = threading.Thread(target=run_discord_bot_safe, daemon=True)
         discord_thread.start()
-        logger.info("✅ Discord bot started in background thread")
+        logger.info("✅ Discord bot started in background thread with isolated event loop")
     except Exception as e:
         logger.error(f"❌ Failed to start Discord bot: {e}")
     
     # Start autonomous orchestrator
     try:
         import autonomous_orchestrator
-        orchestrator_task = asyncio.create_task(autonomous_orchestrator.daily_orchestration())
-        tasks.append(orchestrator_task)
-        logger.info("✅ Autonomous orchestrator started")
+        def run_orchestrator_safe():
+            try:
+                asyncio.run(autonomous_orchestrator.daily_orchestration())
+            except Exception as e:
+                logger.error(f"❌ Orchestrator thread error: {e}")
+                
+        orchestrator_thread = threading.Thread(target=run_orchestrator_safe, daemon=True)
+        orchestrator_thread.start()
+        logger.info("✅ Autonomous orchestrator started in background thread")
     except Exception as e:
         logger.error(f"❌ Failed to start autonomous orchestrator: {e}")
     

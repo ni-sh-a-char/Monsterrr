@@ -596,6 +596,87 @@ async def send_hourly_status_report():
                         f"    • Open issues: {issue_count} (critical {issue_crit}, high {issue_high}, medium {issue_med}, low {issue_low})",
                         f"    • CI pipeline health: {ci_status}; average duration {ci_duration}",
                         f"    • Security alerts: {sec_crit} critical, {sec_warn} warnings pending triage",
+@bot.event
+async def on_ready():
+    """Bot is ready and connected."""
+    global STARTUP_TIME
+    STARTUP_TIME = datetime.now(IST)
+    logger.info(f"Logged in as {bot.user} (id={bot.user.id})")
+    
+    # Send startup message only once
+    state_file = "monsterrr_state.json"
+    if os.path.exists(state_file):
+        with open(state_file, 'r') as f:
+            state = json.load(f)
+    else:
+        state = {}
+        
+    if not state.get('discord_startup_sent'):
+        # Send startup message to the specified channel
+        channel = bot.get_channel(int(settings.DISCORD_CHANNEL_ID))
+        if channel:
+            try:
+                embed = discord.Embed(
+                    title="🚀 Monsterrr is Now Live!",
+                    description=f"GitHub Organization: **{settings.GITHUB_ORG}**\n\n"
+                               f"Monsterrr is now running and will keep your organization healthy and growing, 24/7.",
+                    color=0x2d7ff9
+                )
+                embed.add_field(name="Status", value="✅ Online and operational", inline=True)
+                embed.add_field(name="Mode", value="Hybrid (Web + Worker)", inline=True)
+                embed.set_footer(text="This is a one-time launch notification from Monsterrr.")
+                
+                await channel.send(embed=embed)
+                logger.info("Discord startup message sent and state updated.")
+                
+                # Update state to mark startup message as sent
+                state['discord_startup_sent'] = True
+                state['startup_time'] = datetime.now(IST).isoformat()
+                with open(state_file, 'w') as f:
+                    json.dump(state, f, indent=2)
+            except Exception as e:
+                logger.error(f"Failed to send Discord startup message: {e}")
+        else:
+            logger.warning("Could not find Discord channel. Startup message not sent.")
+    else:
+        logger.info("Discord startup message already sent, skipping.")
+    
+    # Send daily email report in a separate thread to avoid blocking the Discord event loop
+    import threading
+    email_thread = threading.Thread(target=send_daily_email_report, daemon=True)
+    email_thread.start()
+
+def send_hourly_status_report():
+    """Send hourly status report to Discord with better error handling."""
+    try:
+        # Import settings here to avoid circular imports
+        from utils.config import Settings
+        settings = Settings()
+        
+        # Only send if it's the primary guild
+        # Note: guild might not be available in this context, so we'll skip this check
+        # Get guild ID from settings instead
+        guild_id = settings.DISCORD_GUILD_ID
+        
+        # Get channel ID from settings
+        channel_id = settings.DISCORD_CHANNEL_ID
+        
+        if channel_id:
+            ch = bot.get_channel(int(channel_id))
+            if ch:
+                # Get status lines
+                bots_status = get_bots_status()
+                queue_lines = get_queue_lines()
+                analytics = get_analytics()
+                tasks = get_tasks()
+                ideas = get_top_ideas()
+                recent_msgs = get_recent_msgs()
+                next_actions = get_next_actions()
+                
+                if bots_status is not None and queue_lines is not None:
+                    now_ist = datetime.now(IST)
+                    status_lines = [
+                        f"```
                         f"- Automation bots:",
                     ]
                     
@@ -660,11 +741,6 @@ def send_daily_email_report():
             logger.info("SMTP not configured, skipping daily email report.")
             return
             
-        # Only send if it's the primary guild
-        # Note: guild might not be available in this context, so we'll skip this check
-        # Get guild ID from settings instead
-        guild_id = settings.DISCORD_GUILD_ID
-        
         # Check if we should send the report (only once per day)
         state_file = "monsterrr_state.json"
         today = datetime.now(IST).strftime('%Y-%m-%d')
@@ -702,8 +778,28 @@ def send_daily_email_report():
             
             # Send email with better error handling
             if settings.recipients:
-                success = reporting_service.send_email_report(settings.recipients, report)
-                if success:
+                # Run email sending in a separate thread with timeout
+                import threading
+                import time
+                
+                result = {"success": False, "error": None}
+                
+                def send_email_wrapper():
+                    try:
+                        result["success"] = reporting_service.send_email_report(settings.recipients, report)
+                    except Exception as e:
+                        result["error"] = e
+                        
+                email_thread = threading.Thread(target=send_email_wrapper)
+                email_thread.daemon = True
+                email_thread.start()
+                email_thread.join(timeout=30)  # Wait up to 30 seconds
+                
+                if email_thread.is_alive():
+                    logger.warning("Email sending timed out after 30 seconds")
+                elif result["error"]:
+                    logger.error(f"Daily report: Failed to send: {result['error']}")
+                elif result["success"]:
                     logger.info("Daily report sent successfully.")
                 else:
                     logger.error("Daily report: Failed to send")

@@ -24,7 +24,27 @@ def run_bot_with_retry():
     for attempt in range(max_retries):
         try:
             logger.info(f"Starting Discord bot (attempt {attempt + 1}/{max_retries})...")
-            bot.run(discord_token)
+            # Run the bot in a separate event loop to avoid conflicts
+            import asyncio
+            import threading
+            
+            def run_bot_loop():
+                try:
+                    # Create a new event loop for the bot
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    bot.run(discord_token)
+                except Exception as e:
+                    logger.error(f"Discord bot loop error: {e}")
+                    
+            bot_thread = threading.Thread(target=run_bot_loop, daemon=True)
+            bot_thread.start()
+            logger.info("Discord bot started in separate thread with isolated event loop")
+            
+            # Keep the main thread alive but don't block
+            while bot_thread.is_alive():
+                time.sleep(1)
+                
             break  # If bot runs successfully, exit the loop
         except KeyboardInterrupt:
             logger.info("Discord bot shutdown requested.")
@@ -37,7 +57,6 @@ def run_bot_with_retry():
                 time.sleep(retry_delay)
             else:
                 logger.error("Max retries reached. Discord bot failed to start.")
-                # Don't raise the exception, just log it to prevent crashing the entire application
 
 def run_bot():
     """Run the Discord bot (wrapper for compatibility)"""
