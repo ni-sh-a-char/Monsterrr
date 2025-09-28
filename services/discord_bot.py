@@ -648,73 +648,73 @@ async def send_hourly_status_report():
         except Exception as e:
             logger.error(f"Hourly report: Failed to send: {e}")
 
-async def send_daily_email_report():
-    """Send daily email reports only once."""
-    # Check state to see if daily report has already been sent today
-    state_path = "monsterrr_state.json"
-    flag_key = "daily_email_report_sent"
-    date_key = "daily_email_report_date"
-    
-    while True:
-        try:
-            # Load current state
+def send_daily_email_report():
+    """Send daily status report email with better error handling."""
+    try:
+        # Import settings here to avoid circular imports
+        from utils.config import Settings
+        settings = Settings()
+        
+        # Check if SMTP is configured
+        if not settings.SMTP_HOST or not settings.SMTP_USER or not settings.SMTP_PASS:
+            logger.info("SMTP not configured, skipping daily email report.")
+            return
+            
+        # Only send if it's the primary guild
+        # Note: guild might not be available in this context, so we'll skip this check
+        # Get guild ID from settings instead
+        guild_id = settings.DISCORD_GUILD_ID
+        
+        # Check if we should send the report (only once per day)
+        state_file = "monsterrr_state.json"
+        today = datetime.now(IST).strftime('%Y-%m-%d')
+        
+        if os.path.exists(state_file):
+            with open(state_file, 'r') as f:
+                state = json.load(f)
+        else:
             state = {}
-            if os.path.exists(state_path):
-                with open(state_path, "r", encoding="utf-8") as f:
-                    try:
-                        state = json.load(f)
-                    except Exception:
-                        state = {}
             
-            # Check if daily report has already been sent today
-            today = datetime.now(IST).strftime('%Y-%m-%d')
-            last_sent_date = state.get(date_key, "")
+        last_report_date = state.get('last_daily_report', '')
+        if last_report_date == today:
+            return  # Already sent today
             
-            if last_sent_date == today:
-                logger.info(f"Daily email report already sent today ({today}), skipping.")
-            else:
-                # Send the daily report
-                subject, html = build_daily_report()
-                recipients = os.getenv("STATUS_REPORT_RECIPIENTS", "").split(",")
-                smtp_host = os.getenv("SMTP_HOST")
-                smtp_port = int(os.getenv("SMTP_PORT", "587"))
-                smtp_user = os.getenv("SMTP_USER")
-                smtp_pass = os.getenv("SMTP_PASS")
-                
-                if not recipients or not smtp_host or not smtp_user or not smtp_pass:
-                    logger.error("Daily email report: Missing SMTP or recipient config.")
+        # Update state to mark report as sent
+        state['last_daily_report'] = today
+        with open(state_file, 'w') as f:
+            json.dump(state, f, indent=2)
+            
+        # Generate and send report with better error handling
+        try:
+            # Import here to avoid circular imports
+            from services.reporting_service import ReportingService
+            
+            reporting_service = ReportingService(
+                smtp_host=settings.SMTP_HOST,
+                smtp_port=settings.SMTP_PORT,
+                smtp_user=settings.SMTP_USER,
+                smtp_pass=settings.SMTP_PASS,
+                logger=logger
+            )
+            
+            # Generate report
+            report = reporting_service.generate_comprehensive_report()
+            
+            # Send email with better error handling
+            if settings.recipients:
+                success = reporting_service.send_email_report(settings.recipients, report)
+                if success:
+                    logger.info("Daily report sent successfully.")
                 else:
-                    msg = MIMEMultipart("alternative")
-                    msg["Subject"] = subject
-                    msg["From"] = smtp_user
-                    msg["To"] = ", ".join(recipients)
-                    msg.attach(MIMEText(html, "html"))
-                    
-                    try:
-                        with smtplib.SMTP(smtp_host, smtp_port) as server:
-                            server.starttls()
-                            server.login(smtp_user, smtp_pass)
-                            server.sendmail(smtp_user, recipients, msg.as_string())
-                        
-                        logger.info(f"Daily email report sent to: {recipients}")
-                        
-                        # Update state to mark daily report as sent today
-                        try:
-                            state[flag_key] = True
-                            state[date_key] = today
-                            with open(state_path, "w", encoding="utf-8") as f:
-                                json.dump(state, f, indent=2)
-                            logger.info(f"Daily email report state updated for {today}.")
-                        except Exception:
-                            logger.error("Failed to update state file after sending daily email report")
-                    except Exception as e:
-                        logger.error(f"Daily report: Failed to send: {e}")
-            
-            # Wait for 24 hours before checking again
-            await asyncio.sleep(86400)  # 24 hours
+                    logger.error("Daily report: Failed to send")
+            else:
+                logger.warning("No recipients configured for daily report.")
         except Exception as e:
-            logger.error(f"Error in send_daily_email_report: {e}")
-            await asyncio.sleep(3600)  # Wait 1 hour before retrying on error
+            logger.error(f"Daily report: Failed to send: {e}")
+            # Don't let email failures crash the bot
+    except Exception as e:
+        logger.error(f"Error in send_daily_email_report: {e}")
+        # Ensure this function never crashes the bot
 
 # Enhanced command handler for natural language with consciousness
 async def handle_natural_command(intent, content, user_id):

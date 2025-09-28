@@ -93,32 +93,35 @@ def run_hybrid():
             logger.error(f"❌ Service initialization failed: {e}")
             sys.exit(1)
         
-        # Start background services in separate threads
+        # Start background services with better error handling
         def start_background_services():
             try:
-                # Import and start Discord bot
-                from services.discord_bot_runner import run_bot_with_retry
-                def run_discord():
+                # Import and start Discord bot with better error handling
+                def run_discord_safe():
                     try:
+                        from services.discord_bot_runner import run_bot_with_retry
                         run_bot_with_retry()
                     except Exception as e:
                         logger.error(f"❌ Discord bot error: {e}")
                 
-                discord_thread = threading.Thread(target=run_discord, daemon=True)
+                discord_thread = threading.Thread(target=run_discord_safe, daemon=True)
                 discord_thread.start()
                 logger.info("✅ Discord bot started in background")
                 
                 # Import and start autonomous orchestrator
-                import autonomous_orchestrator
-                def run_orchestrator():
-                    try:
-                        asyncio.run(autonomous_orchestrator.daily_orchestration())
-                    except Exception as e:
-                        logger.error(f"❌ Orchestrator error: {e}")
-                
-                orchestrator_thread = threading.Thread(target=run_orchestrator, daemon=True)
-                orchestrator_thread.start()
-                logger.info("✅ Autonomous orchestrator started in background")
+                try:
+                    import autonomous_orchestrator
+                    def run_orchestrator_safe():
+                        try:
+                            asyncio.run(autonomous_orchestrator.daily_orchestration())
+                        except Exception as e:
+                            logger.error(f"❌ Orchestrator error: {e}")
+                    
+                    orchestrator_thread = threading.Thread(target=run_orchestrator_safe, daemon=True)
+                    orchestrator_thread.start()
+                    logger.info("✅ Autonomous orchestrator started in background")
+                except Exception as e:
+                    logger.error(f"❌ Failed to start orchestrator: {e}")
                 
             except Exception as e:
                 logger.error(f"❌ Failed to start background services: {e}")

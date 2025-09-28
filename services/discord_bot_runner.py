@@ -1,6 +1,8 @@
 import time
 import logging
 import os
+import asyncio
+import traceback
 from services.discord_bot import bot
 
 # Set up logging
@@ -8,8 +10,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def run_bot_with_retry():
-    """Run the Discord bot with retry logic"""
-    max_retries = 5
+    """Run the Discord bot with retry logic and better error handling"""
+    max_retries = 3
     retry_delay = 30  # seconds
     
     # Get Discord token from environment variables
@@ -24,8 +26,12 @@ def run_bot_with_retry():
             logger.info(f"Starting Discord bot (attempt {attempt + 1}/{max_retries})...")
             bot.run(discord_token)
             break  # If bot runs successfully, exit the loop
+        except KeyboardInterrupt:
+            logger.info("Discord bot shutdown requested.")
+            break
         except Exception as e:
             logger.error(f"Discord bot failed (attempt {attempt + 1}): {e}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             if attempt < max_retries - 1:
                 logger.info(f"Retrying in {retry_delay} seconds...")
                 time.sleep(retry_delay)

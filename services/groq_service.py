@@ -294,3 +294,58 @@ class GroqService:
                     except Exception as e:
                         if self.logger:
                             self.logger.error(f"[GroqService] Stream decode error: {e}")
+
+    def _make_request_with_backoff(self, prompt: str, max_tokens: int = None, temperature: float = None) -> str:
+        """
+        Make a request to the Groq API with exponential backoff for rate limiting.
+        """
+        max_retries = 4
+        base_delay = 10  # Start with 10 seconds
+        
+        for attempt in range(max_retries):
+            try:
+                self.logger.info(f"[GroqService] Sending request to Groq API (attempt {attempt + 1}) with model {self.model}")
+                
+                # Use tenacity for retries
+                @retry(
+                    stop=stop_after_attempt(3),
+                    wait=wait_exponential(multiplier=1, min=4, max=10),
+                    retry=retry_if_exception_type((RateLimitError, TimeoutError)),
+                    reraise=True
+                )
+                def _make_api_call():
+                    chat_completion = self.client.chat.completions.create(
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": prompt,
+                            }
+                        ],
+                        model=self.model,
+                        max_tokens=max_tokens or self.max_tokens,
+                        temperature=temperature or self.temperature,
+                    )
+                    return chat_completion.choices[0].message.content
+                
+                response = _make_api_call()
+                return response
+                
+            except RateLimitError as e:
+                self.logger.error(f"Groq API rate limit error: {e}")
+                if attempt < max_retries - 1:
+                    # Calculate delay with exponential backoff
+                    delay = base_delay * (2 ** attempt)
+                    # Add some randomness to prevent thundering herd
+                    delay += random.uniform(0, 10)
+                    self.logger.info(f"[GroqService] Rate limited. Waiting {delay:.0f} seconds before retry.")
+                    time.sleep(delay)
+                else:
+                    raise
+            except Exception as e:
+                self.logger.error(f"Groq API error: {e}")
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    self.logger.info(f"[GroqService] Error occurred. Waiting {delay:.0f} seconds before retry.")
+                    time.sleep(delay)
+                else:
+                    raise

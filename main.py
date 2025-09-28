@@ -248,16 +248,17 @@ async def main():
     # Start all services
     tasks = []
     
-    # Start Discord bot with better error handling
+    # Start Discord bot with better isolation
     try:
-        from services.discord_bot_runner import run_bot_with_retry
-        def run_discord_wrapper():
+        def run_discord_bot_safe():
             try:
+                from services.discord_bot_runner import run_bot_with_retry
                 run_bot_with_retry()
             except Exception as e:
-                logger.error(f"❌ Discord bot error: {e}")
+                logger.error(f"❌ Discord bot thread error: {e}")
                 
-        discord_thread = threading.Thread(target=run_discord_wrapper, daemon=True)
+        import threading
+        discord_thread = threading.Thread(target=run_discord_bot_safe, daemon=True)
         discord_thread.start()
         logger.info("✅ Discord bot started in background thread")
     except Exception as e:
@@ -291,7 +292,7 @@ async def main():
     # Run all tasks
     try:
         logger.info("✅ All services started successfully")
-        await asyncio.gather(*tasks)
+        await asyncio.gather(*tasks, return_exceptions=True)
     except KeyboardInterrupt:
         logger.info("🛑 Shutting down Monsterrr...")
         for task in tasks:
