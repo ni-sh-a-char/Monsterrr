@@ -166,29 +166,6 @@ def run_all_background():
         import subprocess
         import sys
         
-        # Start background services in separate processes to suppress their output
-        def start_background_worker():
-            try:
-                # Start the worker in a separate process with suppressed output
-                worker_process = subprocess.Popen(
-                    [sys.executable, "-c", "from main import run_worker; run_worker()"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    stdin=subprocess.DEVNULL
-                )
-                logger.info("✅ Worker processes started in background")
-                return worker_process
-            except Exception as e:
-                logger.error(f"❌ Failed to start background worker: {e}")
-                return None
-        
-        # Start the background worker process
-        worker_process = start_background_worker()
-        
-        # Give background services a moment to start
-        import time
-        time.sleep(2)
-        
         # Setup memory management for web server
         setup_memory_management()
         log_memory_usage()
@@ -200,9 +177,44 @@ def run_all_background():
             logger.info("✅ Configuration validated")
         except Exception as e:
             logger.error(f"❌ Configuration validation failed: {e}")
-            if worker_process:
-                worker_process.terminate()
             sys.exit(1)
+        
+        # Start background services in separate threads for better control
+        def start_background_services():
+            try:
+                # Import and start Discord bot
+                from services.discord_bot_runner import run_bot_with_retry
+                def run_discord():
+                    try:
+                        run_bot_with_retry()
+                    except Exception as e:
+                        logger.error(f"❌ Discord bot error: {e}")
+                
+                discord_thread = threading.Thread(target=run_discord, daemon=True)
+                discord_thread.start()
+                logger.info("✅ Discord bot started in background")
+                
+                # Import and start autonomous orchestrator
+                import autonomous_orchestrator
+                def run_orchestrator():
+                    try:
+                        asyncio.run(autonomous_orchestrator.daily_orchestration())
+                    except Exception as e:
+                        logger.error(f"❌ Orchestrator error: {e}")
+                
+                orchestrator_thread = threading.Thread(target=run_orchestrator, daemon=True)
+                orchestrator_thread.start()
+                logger.info("✅ Autonomous orchestrator started in background")
+                
+            except Exception as e:
+                logger.error(f"❌ Failed to start background services: {e}")
+        
+        # Start background services
+        start_background_services()
+        
+        # Give background services a moment to start
+        import time
+        time.sleep(2)
         
         # Start web server in main thread with full output
         port = int(os.environ.get("PORT", "8000"))
@@ -224,12 +236,6 @@ def run_all_background():
             workers=1
         )
         
-        # Clean up background process when web server exits
-        if worker_process:
-            worker_process.terminate()
-            worker_process.wait()
-            logger.info("🛑 Background worker processes stopped")
-            
     except Exception as e:
         logger.error(f"❌ Failed to start all-in-one mode: {e}")
         sys.exit(1)

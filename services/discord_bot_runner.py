@@ -15,12 +15,12 @@ def run_bot_with_retry():
     # Get Discord token from environment variables
     discord_token = os.getenv("DISCORD_BOT_TOKEN")
     
+    if not discord_token:
+        logger.error("DISCORD_BOT_TOKEN not set! Discord bot will not start.")
+        return
+    
     for attempt in range(max_retries):
         try:
-            if not discord_token:
-                logger.error("DISCORD_BOT_TOKEN not set! Exiting.")
-                return
-            
             logger.info(f"Starting Discord bot (attempt {attempt + 1}/{max_retries})...")
             bot.run(discord_token)
             break  # If bot runs successfully, exit the loop
@@ -31,7 +31,7 @@ def run_bot_with_retry():
                 time.sleep(retry_delay)
             else:
                 logger.error("Max retries reached. Discord bot failed to start.")
-                raise
+                # Don't raise the exception, just log it to prevent crashing the entire application
 
 def run_bot():
     """Run the Discord bot (wrapper for compatibility)"""

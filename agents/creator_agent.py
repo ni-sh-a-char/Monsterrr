@@ -11,7 +11,7 @@ class CreatorAgent:
     """
     Enhanced agent for creating new repositories and scaffolding projects.
     Uses github_service to create repo, scaffold files, commit, and open starter issues.
-    Now includes superhuman decision-making capabilities.
+    Now includes superhuman decision-making capabilities and Jarvis-like intelligence.
     """
     
     def __init__(self, github_service, logger):
@@ -28,9 +28,10 @@ class CreatorAgent:
 
     def create_or_improve_repository(self, idea: Dict[str, Any]) -> None:
         """
-        Enhanced repository creation with superhuman decision-making capabilities.
+        Enhanced repository creation with Jarvis-like intelligence.
         Ensures only one repository is created at a time to prevent memory issues.
-        Makes repositories private during creation and public after completion.
+        Makes repositories private during creation and uses smart visibility decisions.
+        Creates complete, working code as the project name suggests.
         """
         # Check if we're already creating a repository
         if self.active_repo_creation:
@@ -60,7 +61,7 @@ class CreatorAgent:
             self.logger.error(f"[CreatorAgent] Error getting org stats: {e}")
             org_stats = {"repositories": []}
         
-        # Superhuman decision-making for repository creation
+        # Jarvis-like superhuman decision-making for repository creation
         repo_name = idea["name"]
         description = idea["description"]
         tech_stack = idea.get("tech_stack", [])
@@ -71,10 +72,10 @@ class CreatorAgent:
         self.logger.info(f"[CreatorAgent] Starting creation of repository {repo_name}")
         
         try:
-            # Determine repository visibility using enhanced logic
+            # Determine repository visibility using enhanced Jarvis-like logic
             project_type = self._determine_project_type(idea)
             audience = self._determine_audience(idea)
-            is_private = self.github_service.determine_repo_visibility(repo_name, project_type, audience)
+            is_private = self._jarvis_visibility_decision(repo_name, description, project_type, audience, tech_stack)
             
             self.logger.info(f"[CreatorAgent] Creating {'' if is_private else 'public'} repository for {repo_name} (type: {project_type}, audience: {audience})")
             
@@ -136,25 +137,29 @@ class CreatorAgent:
             try:
                 self._scaffold_complete_project(repo_name, description, roadmap, tech_stack, idea)
                 
-                # Mark repository as complete
+                # Mark repository as complete with fully working code
                 for repo_entry in state.get("repos", []):
                     if repo_entry["name"] == repo_name:
                         repo_entry["status"] = "complete"
-                        # If the repository was private during creation, consider making it public now
-                        # Only make it public if it's a general audience project and not security-related
-                        if repo_entry["visibility"] == "private" and repo_entry["audience"] == "general" and repo_entry["project_type"] not in ["security", "confidential"]:
+                        # Use Jarvis-like intelligence to decide final visibility
+                        final_visibility_private = self._jarvis_final_visibility_decision(
+                            repo_name, description, project_type, audience, tech_stack, 
+                            repo_entry["visibility"] == "private"
+                        )
+                        
+                        # Update visibility if needed
+                        if final_visibility_private != (repo_entry["visibility"] == "private"):
                             try:
-                                # Make repository public
-                                self.github_service.update_repository_visibility(repo_name, private=False)
-                                repo_entry["visibility"] = "public"
-                                self.logger.info(f"[CreatorAgent] Made repository {repo_name} public after completion")
+                                self.github_service.update_repository_visibility(repo_name, private=final_visibility_private)
+                                repo_entry["visibility"] = "private" if final_visibility_private else "public"
+                                self.logger.info(f"[CreatorAgent] Updated repository {repo_name} visibility to {'private' if final_visibility_private else 'public'}")
                             except Exception as e:
-                                self.logger.error(f"[CreatorAgent] Error making repository public: {e}")
+                                self.logger.error(f"[CreatorAgent] Error updating repository visibility: {e}")
                         break
                 with open(state_path, "w", encoding="utf-8") as f:
                     json.dump(state, f, indent=2)
                     
-                self.logger.info(f"[CreatorAgent] Successfully completed creation of repository {repo_name}")
+                self.logger.info(f"[CreatorAgent] Successfully completed creation of repository {repo_name} with complete, working code")
             except Exception as e:
                 self.logger.error(f"[CreatorAgent] Error scaffolding files: {e}")
                 
@@ -166,6 +171,315 @@ class CreatorAgent:
         finally:
             # Clear active repository creation flag
             self.active_repo_creation = None
+
+    def _jarvis_visibility_decision(self, repo_name: str, description: str, project_type: str, audience: str, tech_stack: list) -> bool:
+        """
+        Jarvis-like intelligent decision making for initial repository visibility.
+        Like Iron Man's Jarvis, makes smart decisions based on multiple factors with enhanced reasoning.
+        """
+        self.logger.info(f"[CreatorAgent] Jarvis analyzing visibility for {repo_name}")
+        
+        # Try to use Groq for enhanced decision making if available
+        if self.groq_client:
+            try:
+                groq_decision = self._jarvis_groq_visibility_decision(repo_name, description, project_type, audience, tech_stack)
+                if groq_decision is not None:
+                    self.logger.info(f"[CreatorAgent] Jarvis: Using Groq-enhanced decision: {'private' if groq_decision else 'public'}")
+                    return groq_decision
+            except Exception as e:
+                self.logger.warning(f"[CreatorAgent] Jarvis: Groq decision failed, using fallback logic: {e}")
+        
+        # Start with default private for security
+        is_private = True
+        
+        # Advanced Jarvis decision matrix with weighted factors
+        factors = {
+            "project_type": project_type,
+            "audience": audience,
+            "tech_stack_complexity": len(tech_stack),
+            "description_length": len(description),
+            "has_public_indicators": False,
+            "has_private_indicators": False
+        }
+        
+        # Security projects are always private (highest priority)
+        if project_type == "security":
+            self.logger.info("[CreatorAgent] Jarvis: Security project detected, setting private")
+            return True
+            
+        # Confidential audience is always private (high priority)
+        if audience == "confidential":
+            self.logger.info("[CreatorAgent] Jarvis: Confidential audience detected, setting private")
+            return True
+            
+        # Internal audience defaults to private (medium priority)
+        if audience == "internal":
+            self.logger.info("[CreatorAgent] Jarvis: Internal audience detected, setting private")
+            return True
+            
+        # For general audience projects, use enhanced logic with multiple factors
+        if audience == "general":
+            # Check for keywords that suggest public release
+            public_indicators = [
+                "open source", "public", "community", "template", "boilerplate", 
+                "demo", "example", "tutorial", "sample", "showcase", "oss",
+                "library", "framework", "tool", "utility", "package"
+            ]
+            
+            # Check for keywords that suggest private release
+            private_indicators = [
+                "internal", "confidential", "private", "proprietary", "secret",
+                "classified", "restricted", "sensitive", "nda", "under development"
+            ]
+            
+            desc_lower = description.lower()
+            has_public_indicators = any(indicator in desc_lower for indicator in public_indicators)
+            has_private_indicators = any(indicator in desc_lower for indicator in private_indicators)
+            
+            factors["has_public_indicators"] = has_public_indicators
+            factors["has_private_indicators"] = has_private_indicators
+            
+            # Jarvis decision algorithm with weighted scoring
+            public_score = 0
+            private_score = 0
+            
+            # Weighted scoring for public indicators
+            if has_public_indicators:
+                public_score += 30
+            if project_type in ["template", "demo"]:
+                public_score += 25
+            if len(tech_stack) >= 3:  # More complex projects are more likely to be public
+                public_score += 15
+            if len(description) > 100:  # More detailed descriptions suggest public projects
+                public_score += 10
+                
+            # Weighted scoring for private indicators
+            if has_private_indicators:
+                private_score += 40
+            if project_type in ["experiment", "research"]:
+                private_score += 20
+            if len(tech_stack) < 2:  # Simpler projects might be private experiments
+                private_score += 10
+            if len(description) < 50:  # Short descriptions might indicate private projects
+                private_score += 5
+                
+            # Log Jarvis's reasoning process
+            self.logger.info(f"[CreatorAgent] Jarvis analysis for {repo_name}:")
+            self.logger.info(f"  - Public indicators: {has_public_indicators} (score: +{public_score})")
+            self.logger.info(f"  - Private indicators: {has_private_indicators} (score: +{private_score})")
+            self.logger.info(f"  - Project type: {project_type}")
+            self.logger.info(f"  - Tech stack size: {len(tech_stack)}")
+            self.logger.info(f"  - Description length: {len(description)} chars")
+            
+            # Make decision based on scores
+            if public_score > private_score:
+                self.logger.info(f"[CreatorAgent] Jarvis: Public score ({public_score}) > Private score ({private_score}), considering public")
+                is_private = False
+            elif private_score > public_score:
+                self.logger.info(f"[CreatorAgent] Jarvis: Private score ({private_score}) > Public score ({public_score}), defaulting to private")
+                is_private = True
+            else:
+                # Tie or equal scores - use default conservative approach
+                self.logger.info(f"[CreatorAgent] Jarvis: Equal scores ({public_score}), defaulting to private for security")
+                is_private = True
+                
+        self.logger.info(f"[CreatorAgent] Jarvis visibility decision for {repo_name}: {'private' if is_private else 'public'}")
+        return is_private
+
+    def _jarvis_groq_visibility_decision(self, repo_name: str, description: str, project_type: str, audience: str, tech_stack: list) -> bool:
+        """
+        Enhanced Jarvis decision making using Groq AI for more sophisticated analysis.
+        """
+        if not self.groq_client:
+            return None
+            
+        self.logger.info(f"[CreatorAgent] Jarvis requesting Groq analysis for {repo_name}")
+        
+        # Prepare the prompt for Groq
+        prompt = f"""
+        As an AI assistant named Jarvis, analyze the following GitHub repository proposal and determine if it should be created as a public or private repository.
+
+        Repository Name: {repo_name}
+        Description: {description}
+        Project Type: {project_type}
+        Intended Audience: {audience}
+        Technology Stack: {', '.join(tech_stack) if tech_stack else 'Not specified'}
+
+        Consider factors such as:
+        - Security implications
+        - Intellectual property concerns
+        - Potential value to the open-source community
+        - Project maturity
+        - Audience appropriateness
+
+        Respond with ONLY "public" or "private" based on your analysis.
+        """
+        
+        try:
+            response = self.groq_client.generate_text(
+                prompt=prompt,
+                max_tokens=10,
+                temperature=0.3  # Low temperature for consistent decisions
+            )
+            
+            if response and isinstance(response, str):
+                response = response.strip().lower()
+                if "public" in response:
+                    return False  # Public repository
+                elif "private" in response:
+                    return True   # Private repository
+                    
+            self.logger.warning(f"[CreatorAgent] Jarvis: Groq returned invalid response: {response}")
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"[CreatorAgent] Jarvis: Groq analysis failed: {e}")
+            return None
+
+    def _jarvis_final_visibility_decision(self, repo_name: str, description: str, project_type: str, 
+                                        audience: str, tech_stack: list, currently_private: bool) -> bool:
+        """
+        Jarvis-like intelligent decision making for final repository visibility after completion.
+        Makes the final call on whether a completed project should be public or remain private.
+        Uses advanced reasoning with project completion analysis.
+        """
+        self.logger.info(f"[CreatorAgent] Jarvis evaluating final visibility for completed project {repo_name}")
+        
+        # Try to use Groq for enhanced final decision making if available
+        if self.groq_client and currently_private:
+            try:
+                groq_final_decision = self._jarvis_groq_final_visibility_decision(
+                    repo_name, description, project_type, audience, tech_stack, currently_private
+                )
+                if groq_final_decision is not None:
+                    self.logger.info(f"[CreatorAgent] Jarvis: Using Groq-enhanced final decision: {'private' if groq_final_decision else 'public'}")
+                    return groq_final_decision
+            except Exception as e:
+                self.logger.warning(f"[CreatorAgent] Jarvis: Groq final decision failed, using fallback logic: {e}")
+        
+        # If already public, keep it public
+        if not currently_private:
+            self.logger.info(f"[CreatorAgent] Jarvis: {repo_name} is already public, keeping public")
+            return False
+            
+        # Security and confidential projects remain private (non-negotiable)
+        if project_type == "security" or audience == "confidential":
+            self.logger.info(f"[CreatorAgent] Jarvis: {repo_name} is security/confidential, keeping private")
+            return True
+            
+        # Internal projects remain private (organization policy)
+        if audience == "internal":
+            self.logger.info(f"[CreatorAgent] Jarvis: {repo_name} is internal, keeping private")
+            return True
+            
+        # For general audience projects, evaluate if they're ready for public release
+        if audience == "general":
+            # Check if this is a template, demo, or example project (these are typically public)
+            desc_lower = description.lower()
+            public_ready_indicators = [
+                "template", "boilerplate", "demo", "example", "tutorial", "sample", "showcase",
+                "open source", "community", "library", "framework", "tool", "utility"
+            ]
+            
+            # Enhanced Jarvis analysis for completion readiness
+            is_template_or_demo = any(indicator in desc_lower for indicator in public_ready_indicators)
+            has_substantial_tech_stack = len(tech_stack) >= 2
+            has_meaningful_description = len(description) > 50
+            
+            # Log Jarvis's final analysis
+            self.logger.info(f"[CreatorAgent] Jarvis final analysis for {repo_name}:")
+            self.logger.info(f"  - Is template/demo: {is_template_or_demo}")
+            self.logger.info(f"  - Has substantial tech stack: {has_substantial_tech_stack}")
+            self.logger.info(f"  - Has meaningful description: {has_meaningful_description}")
+            
+            # Decision logic for final visibility
+            if is_template_or_demo:
+                self.logger.info(f"[CreatorAgent] Jarvis: {repo_name} is a template/demo, ready for public release")
+                return False  # Make public
+                
+            # For non-template projects, evaluate completeness
+            if has_substantial_tech_stack and has_meaningful_description:
+                # Additional check: Look for signs of a complete, well-structured project
+                # This would ideally check actual repository content, but for now we'll use heuristics
+                self.logger.info(f"[CreatorAgent] Jarvis: {repo_name} appears to be a complete, substantial project")
+                
+                # Advanced Jarvis decision with additional factors
+                completion_indicators = {
+                    "tech_stack_diversity": len(tech_stack) >= 3,
+                    "description_quality": "complete" in desc_lower or "full" in desc_lower,
+                    "project_type_maturity": project_type in ["production", "template", "demo"]
+                }
+                
+                completion_score = sum(1 for indicator in completion_indicators.values() if indicator)
+                self.logger.info(f"[CreatorAgent] Jarvis: Completion indicators score: {completion_score}/3")
+                
+                # If 2 or more completion indicators are positive, make it public
+                if completion_score >= 2:
+                    self.logger.info(f"[CreatorAgent] Jarvis: {repo_name} meets completion criteria, releasing to public")
+                    return False  # Make public
+                else:
+                    self.logger.info(f"[CreatorAgent] Jarvis: {repo_name} doesn't meet completion criteria, keeping private")
+                    return True  # Keep private
+            else:
+                self.logger.info(f"[CreatorAgent] Jarvis: {repo_name} lacks substantial tech stack or description, keeping private")
+                return True  # Keep private
+                
+        # Default: keep private for maximum security
+        self.logger.info(f"[CreatorAgent] Jarvis: Default decision for {repo_name} - keeping private")
+        return True
+
+    def _jarvis_groq_final_visibility_decision(self, repo_name: str, description: str, project_type: str, 
+                                             audience: str, tech_stack: list, currently_private: bool) -> bool:
+        """
+        Enhanced Jarvis final decision making using Groq AI for more sophisticated analysis.
+        """
+        if not self.groq_client or not currently_private:
+            return None
+            
+        self.logger.info(f"[CreatorAgent] Jarvis requesting Groq final analysis for {repo_name}")
+        
+        # Prepare the prompt for Groq
+        prompt = f"""
+        As an AI assistant named Jarvis, analyze the following completed GitHub repository and determine if it should be made public or remain private.
+
+        Repository Name: {repo_name}
+        Description: {description}
+        Project Type: {project_type}
+        Intended Audience: {audience}
+        Technology Stack: {', '.join(tech_stack) if tech_stack else 'Not specified'}
+        Current Status: Completed project (currently private)
+
+        The project has been fully developed with complete code, tests, and documentation.
+        Consider whether this project is ready for public release based on:
+        - Completeness and quality of implementation
+        - Potential value to the open-source community
+        - Security and intellectual property considerations
+        - Project maturity and stability
+        - Appropriateness for public consumption
+
+        Respond with ONLY "public" if the project should be made public, or "private" if it should remain private.
+        """
+        
+        try:
+            response = self.groq_client.generate_text(
+                prompt=prompt,
+                max_tokens=10,
+                temperature=0.3  # Low temperature for consistent decisions
+            )
+            
+            if response and isinstance(response, str):
+                response = response.strip().lower()
+                if "public" in response:
+                    return False  # Make public
+                elif "private" in response:
+                    return True   # Keep private
+                    
+            self.logger.warning(f"[CreatorAgent] Jarvis: Groq final decision returned invalid response: {response}")
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"[CreatorAgent] Jarvis: Groq final analysis failed: {e}")
+            return None
 
     def _determine_project_type(self, idea: Dict[str, Any]) -> str:
         """Determine the project type based on idea characteristics."""

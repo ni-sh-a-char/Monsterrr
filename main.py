@@ -248,13 +248,18 @@ async def main():
     # Start all services
     tasks = []
     
-    # Start Discord bot
+    # Start Discord bot with better error handling
     try:
-        # Fix the import - use the correct function from discord_bot_runner
         from services.discord_bot_runner import run_bot_with_retry
-        discord_task = asyncio.create_task(asyncio.to_thread(run_bot_with_retry))
-        tasks.append(discord_task)
-        logger.info("✅ Discord bot started")
+        def run_discord_wrapper():
+            try:
+                run_bot_with_retry()
+            except Exception as e:
+                logger.error(f"❌ Discord bot error: {e}")
+                
+        discord_thread = threading.Thread(target=run_discord_wrapper, daemon=True)
+        discord_thread.start()
+        logger.info("✅ Discord bot started in background thread")
     except Exception as e:
         logger.error(f"❌ Failed to start Discord bot: {e}")
     

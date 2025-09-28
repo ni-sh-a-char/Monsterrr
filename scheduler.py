@@ -169,6 +169,12 @@ def send_status_report():
 
 def send_startup_email():
     logger.info("[Scheduler] Sending one-time startup status email.")
+    
+    # Check if SMTP is configured
+    if not settings.SMTP_HOST or not settings.SMTP_USER or not settings.SMTP_PASS:
+        logger.warning("[Scheduler] SMTP not configured. Skipping startup email.")
+        return
+        
     state = {}
     if os.path.exists("monsterrr_state.json"):
         with open("monsterrr_state.json", "r", encoding="utf-8") as f:
@@ -200,7 +206,7 @@ def send_startup_email():
     <h1 style='color:#2d7ff9;margin-bottom:0.2em;'>Monsterrr is Now Live!</h1>
     <p style='font-size:1.1em;color:#333;margin-top:0;'>
         <b>Welcome to your autonomous GitHub organization manager.</b><br>
-        <b>Organization:</b> {settings.GITHUB_ORG}
+        <b>Organization:</b> {settings.GITHUB_ORG or 'Not configured'}
     </p>
     <hr style='border:0;border-top:1px solid #e3e7ee;margin:18px 0;'>
     <h2 style='color:#222;font-size:1.15em;margin-bottom:0.5em;'>Initial System Status</h2>
@@ -219,7 +225,7 @@ def send_startup_email():
     text = f"""
 Monsterrr is Now Live!
 
-Organization: {settings.GITHUB_ORG}
+Organization: {settings.GITHUB_ORG or 'Not configured'}
 
 Initial System Status:
 Repositories detected: {summary.get('repositories', 0)}
@@ -236,14 +242,14 @@ This is a one-time launch notification from Monsterrr.
     msg = MIMEMultipart('alternative')
     msg['Subject'] = subject
     msg['From'] = settings.SMTP_USER
-    msg['To'] = ", ".join(settings.recipients)
+    msg['To'] = ", ".join(settings.recipients) if settings.recipients else settings.SMTP_USER
     msg.attach(MIMEText(text, 'plain'))
     msg.attach(MIMEText(html, 'html'))
     try:
-        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
+        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT or 587) as server:
             server.starttls()
             server.login(settings.SMTP_USER, settings.SMTP_PASS)
-            server.sendmail(settings.SMTP_USER, settings.recipients, msg.as_string())
+            server.sendmail(settings.SMTP_USER, settings.recipients if settings.recipients else [settings.SMTP_USER], msg.as_string())
         logger.info("[Scheduler] Startup email sent.")
     except Exception as e:
         logger.error(f"[Scheduler] Failed to send startup email: {e}\n{traceback.format_exc()}")
