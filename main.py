@@ -35,23 +35,24 @@ app = FastAPI()
 async def startup_event():
     import os
     port = os.environ.get("PORT", "8000")
-    logger.info("========================================")
-    logger.info("🎉 MONSTERRR WEB SERVER STARTUP COMPLETE")
-    logger.info("========================================")
-    logger.info(f"✅ Server listening on port {port}")
-    logger.info(f"✅ Health check: http://0.0.0.0:{port}/health")
-    logger.info(f"✅ API docs: http://0.0.0.0:{port}/docs")
-    logger.info(f"✅ Root endpoint: http://0.0.0.0:{port}/")
-    logger.info("========================================")
-    logger.info("🚀 MONSTERRR IS READY TO SERVE REQUESTS")
-    logger.info("========================================")
+    # Clean, minimal startup message for Render
+    print("========================================")
+    print("🎉 MONSTERRR WEB SERVER STARTUP COMPLETE")
+    print("========================================")
+    print(f"✅ Server listening on port {port}")
+    print(f"✅ Health check: http://0.0.0.0:{port}/health")
+    print(f"✅ API docs: http://0.0.0.0:{port}/docs")
+    print(f"✅ Root endpoint: http://0.0.0.0:{port}/")
+    print("========================================")
+    print("🚀 MONSTERRR IS READY TO SERVE REQUESTS")
+    print("========================================")
 
 # Add shutdown event for clean shutdown logging
 @app.on_event("shutdown")
 async def shutdown_event():
-    logger.info("========================================")
-    logger.info("🛑 MONSTERRR WEB SERVER SHUTTING DOWN")
-    logger.info("========================================")
+    print("========================================")
+    print("🛑 MONSTERRR WEB SERVER SHUTTING DOWN")
+    print("========================================")
 
 # Keep-alive mechanism to prevent Render from shutting down idle services
 def start_keep_alive():
@@ -95,18 +96,8 @@ import autonomous_orchestrator
 # Health check endpoint for Render
 @app.get("/health")
 async def health_check():
-    """Health check endpoint for Render"""
-    import psutil
-    import os
-    process = psutil.Process(os.getpid())
-    memory_mb = process.memory_info().rss / 1024 / 1024
-    
-    return {
-        "status": "healthy", 
-        "timestamp": datetime.now().isoformat(),
-        "memory_usage_mb": round(memory_mb, 2),
-        "port": os.environ.get("PORT", "8000")
-    }
+    """Health check endpoint for Render - returns clean 200 OK"""
+    return {"status": "healthy"}
 
 # Root endpoint
 @app.get("/")

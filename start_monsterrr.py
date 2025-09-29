@@ -12,10 +12,10 @@ import signal
 import threading
 from typing import List
 
-# Setup logging
+# Setup minimal logging for cleaner terminal output
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
         logging.StreamHandler(sys.stdout)
     ]
@@ -156,9 +156,9 @@ def run_hybrid():
 
 def run_all_background():
     """Run the entire project with workers in background and show only web results in terminal."""
-    logger.info("🌟 Starting Monsterrr All-in-One Mode")
-    logger.info("🤖 Running worker processes in background")
-    logger.info("🌐 Web server output will be displayed in terminal")
+    # For this mode, we want minimal output - only web server info
+    # Set up a minimal logger for this mode
+    logging.getLogger().setLevel(logging.WARNING)  # Reduce logging noise
     
     try:
         # Import required modules
@@ -182,9 +182,8 @@ def run_all_background():
         settings = Settings()
         try:
             settings.validate()
-            logger.info("✅ Configuration validated")
         except Exception as e:
-            logger.error(f"❌ Configuration validation failed: {e}")
+            print(f"❌ Configuration validation failed: {e}")
             sys.exit(1)
         
         # Start background services in separate threads for better control
@@ -196,11 +195,10 @@ def run_all_background():
                     try:
                         run_bot_with_retry()
                     except Exception as e:
-                        logger.error(f"❌ Discord bot error: {e}")
+                        pass  # Suppress errors in background
                 
                 discord_thread = threading.Thread(target=run_discord, daemon=True)
                 discord_thread.start()
-                logger.info("✅ Discord bot started in background")
                 
                 # Import and start autonomous orchestrator
                 import autonomous_orchestrator
@@ -208,14 +206,13 @@ def run_all_background():
                     try:
                         asyncio.run(autonomous_orchestrator.daily_orchestration())
                     except Exception as e:
-                        logger.error(f"❌ Orchestrator error: {e}")
+                        pass  # Suppress errors in background
                 
                 orchestrator_thread = threading.Thread(target=run_orchestrator, daemon=True)
                 orchestrator_thread.start()
-                logger.info("✅ Autonomous orchestrator started in background")
                 
             except Exception as e:
-                logger.error(f"❌ Failed to start background services: {e}")
+                pass  # Suppress errors in background
         
         # Start background services
         start_background_services()
@@ -224,34 +221,33 @@ def run_all_background():
         import time
         time.sleep(2)
         
-        # Start web server in main thread with full output
+        # Start web server in main thread with clean output
         port = int(os.environ.get("PORT", "8000"))
-        logger.info("========================================")
-        logger.info("🚀 STARTING MONSTERRR WEB SERVER")
-        logger.info("========================================")
-        logger.info(f"🌍 Binding to host 0.0.0.0 on port {port}")
-        logger.info(f"🔍 Health check endpoint: http://0.0.0.0:{port}/health")
-        logger.info(f"📚 API documentation: http://0.0.0.0:{port}/docs")
-        logger.info("🔄 Starting uvicorn server...")
-        logger.info("========================================")
+        
+        # Clean, minimal output for Render terminal
+        print("========================================")
+        print("🚀 MONSTERRR WEB SERVER STARTING")
+        print("========================================")
+        print(f"📡 Listening on port {port}")
+        print(f"✅ Health check: http://0.0.0.0:{port}/health")
+        print("🔄 Server is ready to accept connections")
+        print("========================================")
         
         # Run the web server in the main thread (output will be visible)
         uvicorn.run(
             "main:app",
             host="0.0.0.0",
             port=port,
-            log_level="info",
+            log_level="warning",  # Minimal logging
             workers=1
         )
         
     except Exception as e:
-        logger.error(f"❌ Failed to start all-in-one mode: {e}")
+        print(f"❌ Failed to start all-in-one mode: {e}")
         sys.exit(1)
 
 def main():
     """Main entry point."""
-    logger.info("🚀 Starting Monsterrr - Autonomous GitHub Organization Manager")
-    
     # Determine mode based on environment variables
     mode = os.environ.get("MONSTERRR_MODE", "hybrid").lower()
     start_mode = os.environ.get("START_MODE", "").lower()
@@ -271,7 +267,17 @@ def main():
     elif len(sys.argv) > 1:
         mode = sys.argv[1].lower()
     
-    logger.info(f"🔧 Starting in {mode} mode")
+    # For Render deployment, we want clean terminal output
+    if os.environ.get("RENDER") == "true" or mode == "all":
+        # Clean, minimal startup message for Render
+        print("🚀 Starting Monsterrr - Autonomous GitHub Organization Manager")
+        print(f"🔧 Mode: {mode}")
+        
+        if mode == "all":
+            run_all_background()
+        else:
+            # For other modes on Render, still provide clean output
+            logging.getLogger().setLevel(logging.WARNING)  # Reduce logging noise
     
     if mode == "web":
         run_web_server()
@@ -280,7 +286,9 @@ def main():
     elif mode == "hybrid":
         run_hybrid()
     elif mode == "all":
-        run_all_background()
+        # Already handled above for Render
+        if not (os.environ.get("RENDER") == "true"):
+            run_all_background()
     else:
         logger.error(f"❌ Unknown mode: {mode}. Use 'web', 'worker', 'hybrid', or 'all'")
         sys.exit(1)
